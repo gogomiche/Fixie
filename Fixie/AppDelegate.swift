@@ -3,6 +3,11 @@ import SwiftUI
 import Carbon.HIToolbox
 import UserNotifications
 
+class StreamingState: ObservableObject {
+    @Published var text: String = ""
+    @Published var isComplete: Bool = false
+}
+
 class AppDelegate: NSObject, NSApplicationDelegate {
     var settingsManager = SettingsManager()
     var hotkeyManager: HotkeyManager!
@@ -10,6 +15,8 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     var settingsWindow: NSWindow?
     var currentOriginalText: String = ""
     var currentCorrectedText: String = ""
+    var streamingState = StreamingState()
+    var eventMonitor: Any?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         setupHotkey()
@@ -124,23 +131,34 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
         let llmService = LLMServiceFactory.create(provider: settingsManager.selectedProvider, settings: settingsManager)
 
-        // Show loading indicator
-        showDiffWindow(original: text, corrected: nil, isLoading: true)
+        // Reset streaming state and show window
+        streamingState.text = ""
+        streamingState.isComplete = false
+        showDiffWindow(original: text)
 
         Task {
             do {
-                print("[Fixie] Calling LLM API...")
-                let correctedText = try await llmService.correctGrammar(text: text)
+                print("[Fixie] Calling LLM API with streaming...")
+                var fullText = ""
+
+                for try await chunk in llmService.correctGrammarStreaming(text: text) {
+                    fullText += chunk
+                    await MainActor.run {
+                        self.streamingState.text = fullText
+                    }
+                }
+
+                let correctedText = fullText.trimmingCharacters(in: .whitespacesAndNewlines)
                 print("[Fixie] Got response: \(correctedText)")
                 await MainActor.run {
                     self.currentCorrectedText = correctedText
-                    self.showDiffWindow(original: text, corrected: correctedText, isLoading: false)
+                    self.streamingState.text = correctedText
+                    self.streamingState.isComplete = true
                 }
             } catch {
                 print("[Fixie] API Error: \(error)")
                 await MainActor.run {
                     self.closeDiffWindow()
-                    // Show alert for better visibility
                     let alert = NSAlert()
                     alert.messageText = "Fixie Error"
                     alert.informativeText = error.localizedDescription
@@ -153,13 +171,12 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
-    private func showDiffWindow(original: String, corrected: String?, isLoading: Bool) {
+    private func showDiffWindow(original: String) {
         closeDiffWindow()
 
-        let diffView = DiffPopupView(
+        let diffView = StreamingDiffPopupView(
             originalText: original,
-            correctedText: corrected ?? "",
-            isLoading: isLoading,
+            streamingState: streamingState,
             onAccept: { [weak self] in
                 self?.acceptCorrection()
             },
@@ -188,12 +205,13 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         window.makeKeyAndOrderFront(nil)
 
         // Handle keyboard events
-        NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
-            if event.keyCode == 36 && !isLoading { // Enter key
-                self?.acceptCorrection()
+        eventMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
+            guard let self = self else { return event }
+            if event.keyCode == 36 && self.streamingState.isComplete { // Enter key
+                self.acceptCorrection()
                 return nil
             } else if event.keyCode == 53 { // Escape key
-                self?.closeDiffWindow()
+                self.closeDiffWindow()
                 return nil
             }
             return event
@@ -213,8 +231,11 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
         closeDiffWindow()
 
-        // Simulate paste
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+        // Hide our app to return focus to the previous app
+        NSApp.hide(nil)
+
+        // Simulate paste after focus returns
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
             self.simulatePaste()
         }
     }
@@ -234,6 +255,10 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func closeDiffWindow() {
+        if let monitor = eventMonitor {
+            NSEvent.removeMonitor(monitor)
+            eventMonitor = nil
+        }
         diffWindow?.close()
         diffWindow = nil
     }

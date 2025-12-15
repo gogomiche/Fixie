@@ -2,6 +2,7 @@ import Foundation
 
 protocol LLMService {
     func correctGrammar(text: String) async throws -> String
+    func correctGrammarStreaming(text: String) -> AsyncThrowingStream<String, Error>
 }
 
 enum LLMError: LocalizedError {

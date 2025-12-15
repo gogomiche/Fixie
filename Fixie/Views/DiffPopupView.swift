@@ -4,6 +4,7 @@ struct DiffPopupView: View {
     let originalText: String
     let correctedText: String
     let isLoading: Bool
+    let streamingText: String
     let onAccept: () -> Void
     let onReject: () -> Void
 
@@ -28,14 +29,15 @@ struct DiffPopupView: View {
             Divider()
 
             if isLoading {
-                // Loading state
-                VStack(spacing: 12) {
-                    ProgressView()
-                    Text("Checking grammar...")
-                        .foregroundColor(.secondary)
+                // Streaming state - show text as it comes in
+                ScrollView {
+                    Text(streamingText.isEmpty ? "Checking grammar..." : streamingText)
+                        .foregroundColor(streamingText.isEmpty ? .secondary : .primary)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(12)
+                        .background(Color(NSColor.textBackgroundColor))
+                        .cornerRadius(8)
                 }
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-                .padding()
             } else if !hasChanges {
                 // No changes needed
                 VStack(spacing: 12) {
@@ -108,12 +110,16 @@ struct DiffPopupView: View {
         .padding()
         .frame(minWidth: 400, minHeight: 200)
         .onAppear {
-            if !isLoading {
-                calculateDiff()
+            if !isLoading && !correctedText.isEmpty {
+                calculateDiff(with: correctedText)
             }
         }
-        .onChange(of: correctedText) { _ in
-            calculateDiff()
+        .onChange(of: correctedText) { newCorrectedText in
+            // When correctedText becomes non-empty, streaming is complete - calculate diff
+            // Must use newCorrectedText, not self.correctedText (which is stale)
+            if !newCorrectedText.isEmpty {
+                calculateDiff(with: newCorrectedText)
+            }
         }
     }
 
@@ -141,11 +147,35 @@ struct DiffPopupView: View {
         .textSelection(.enabled)
     }
 
-    private func calculateDiff() {
-        hasChanges = DiffCalculator.hasChanges(original: originalText, corrected: correctedText)
+    private func calculateDiff(with corrected: String) {
+        print("[Fixie] DiffPopupView.calculateDiff called")
+        print("[Fixie] originalText: '\(originalText.prefix(50))...'")
+        print("[Fixie] corrected: '\(corrected.prefix(50))...'")
+
+        hasChanges = DiffCalculator.hasChanges(original: originalText, corrected: corrected)
+        print("[Fixie] hasChanges: \(hasChanges)")
+
         if hasChanges {
-            diffSegments = DiffCalculator.calculateDiff(original: originalText, corrected: correctedText)
+            diffSegments = DiffCalculator.calculateDiff(original: originalText, corrected: corrected)
         }
+    }
+}
+
+struct StreamingDiffPopupView: View {
+    let originalText: String
+    @ObservedObject var streamingState: StreamingState
+    let onAccept: () -> Void
+    let onReject: () -> Void
+
+    var body: some View {
+        DiffPopupView(
+            originalText: originalText,
+            correctedText: streamingState.isComplete ? streamingState.text : "",
+            isLoading: !streamingState.isComplete,
+            streamingText: streamingState.text,
+            onAccept: onAccept,
+            onReject: onReject
+        )
     }
 }
 
@@ -154,6 +184,7 @@ struct DiffPopupView: View {
         originalText: "This is a sentense with some erors in it.",
         correctedText: "This is a sentence with some errors in it.",
         isLoading: false,
+        streamingText: "",
         onAccept: {},
         onReject: {}
     )

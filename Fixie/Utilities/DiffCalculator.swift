@@ -16,10 +16,22 @@ struct DiffSegment: Identifiable {
 class DiffCalculator {
     /// Calculates word-level diff between original and corrected text
     static func calculateDiff(original: String, corrected: String) -> [DiffSegment] {
-        let originalWords = tokenize(original)
-        let correctedWords = tokenize(corrected)
+        // Normalize both texts to avoid whitespace-only differences
+        let normalizedOriginal = original.trimmingCharacters(in: .whitespacesAndNewlines)
+        let normalizedCorrected = corrected.trimmingCharacters(in: .whitespacesAndNewlines)
+
+        print("[Fixie] calculateDiff - original: '\(normalizedOriginal.prefix(50))...'")
+        print("[Fixie] calculateDiff - corrected: '\(normalizedCorrected.prefix(50))...'")
+
+        let originalWords = tokenize(normalizedOriginal)
+        let correctedWords = tokenize(normalizedCorrected)
+
+        print("[Fixie] originalWords count: \(originalWords.count), first 5: \(originalWords.prefix(5))")
+        print("[Fixie] correctedWords count: \(correctedWords.count), first 5: \(correctedWords.prefix(5))")
 
         let lcs = longestCommonSubsequence(originalWords, correctedWords)
+        print("[Fixie] LCS count: \(lcs.count), first 5: \(lcs.prefix(5))")
+
         var result: [DiffSegment] = []
 
         var origIndex = 0
@@ -93,6 +105,9 @@ class DiffCalculator {
     private static func longestCommonSubsequence(_ a: [String], _ b: [String]) -> [String] {
         let m = a.count
         let n = b.count
+
+        // Handle empty arrays - prevents invalid range 1...0
+        guard m > 0 && n > 0 else { return [] }
 
         var dp = Array(repeating: Array(repeating: 0, count: n + 1), count: m + 1)
 
