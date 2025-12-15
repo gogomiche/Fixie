@@ -112,17 +112,20 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func simulateCopy() {
+        // Source can be nil - CGEvent still works without it
         let source = CGEventSource(stateID: .hidSystemState)
 
         // Key down
-        let keyDown = CGEvent(keyboardEventSource: source, virtualKey: CGKeyCode(kVK_ANSI_C), keyDown: true)
-        keyDown?.flags = .maskCommand
-        keyDown?.post(tap: .cghidEventTap)
+        if let keyDown = CGEvent(keyboardEventSource: source, virtualKey: CGKeyCode(kVK_ANSI_C), keyDown: true) {
+            keyDown.flags = .maskCommand
+            keyDown.post(tap: .cghidEventTap)
+        }
 
         // Key up
-        let keyUp = CGEvent(keyboardEventSource: source, virtualKey: CGKeyCode(kVK_ANSI_C), keyDown: false)
-        keyUp?.flags = .maskCommand
-        keyUp?.post(tap: .cghidEventTap)
+        if let keyUp = CGEvent(keyboardEventSource: source, virtualKey: CGKeyCode(kVK_ANSI_C), keyDown: false) {
+            keyUp.flags = .maskCommand
+            keyUp.post(tap: .cghidEventTap)
+        }
     }
 
     private func checkGrammar(text: String) {
@@ -229,29 +232,35 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         pasteboard.clearContents()
         pasteboard.setString(currentCorrectedText, forType: .string)
 
-        closeDiffWindow()
+        // Defer window close to avoid crash when called from event monitor callback
+        DispatchQueue.main.async { [weak self] in
+            self?.closeDiffWindow()
 
-        // Hide our app to return focus to the previous app
-        NSApp.hide(nil)
+            // Hide our app to return focus to the previous app
+            NSApp.hide(nil)
 
-        // Simulate paste after focus returns
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
-            self.simulatePaste()
+            // Simulate paste after focus returns
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) { [weak self] in
+                self?.simulatePaste()
+            }
         }
     }
 
     private func simulatePaste() {
+        // Source can be nil - CGEvent still works without it
         let source = CGEventSource(stateID: .hidSystemState)
 
         // Key down
-        let keyDown = CGEvent(keyboardEventSource: source, virtualKey: CGKeyCode(kVK_ANSI_V), keyDown: true)
-        keyDown?.flags = .maskCommand
-        keyDown?.post(tap: .cghidEventTap)
+        if let keyDown = CGEvent(keyboardEventSource: source, virtualKey: CGKeyCode(kVK_ANSI_V), keyDown: true) {
+            keyDown.flags = .maskCommand
+            keyDown.post(tap: .cghidEventTap)
+        }
 
         // Key up
-        let keyUp = CGEvent(keyboardEventSource: source, virtualKey: CGKeyCode(kVK_ANSI_V), keyDown: false)
-        keyUp?.flags = .maskCommand
-        keyUp?.post(tap: .cghidEventTap)
+        if let keyUp = CGEvent(keyboardEventSource: source, virtualKey: CGKeyCode(kVK_ANSI_V), keyDown: false) {
+            keyUp.flags = .maskCommand
+            keyUp.post(tap: .cghidEventTap)
+        }
     }
 
     private func closeDiffWindow() {
