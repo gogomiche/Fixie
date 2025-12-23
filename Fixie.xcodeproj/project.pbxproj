@@ -18,6 +18,7 @@
 		A1000009 /* DiffCalculator.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000009; };
 		A1000010 /* DiffPopupView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000010; };
 		A1000011 /* SettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000011; };
+		A1000012 /* GrammarPopupView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000014; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -33,6 +34,7 @@
 		A2000010 /* DiffPopupView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DiffPopupView.swift; sourceTree = "<group>"; };
 		A2000011 /* SettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsView.swift; sourceTree = "<group>"; };
 		A2000012 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
+		A2000014 /* GrammarPopupView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GrammarPopupView.swift; sourceTree = "<group>"; };
 		A2000013 /* Fixie.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = Fixie.entitlements; sourceTree = "<group>"; };
 		A3000001 /* Fixie.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Fixie.app; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
@@ -94,6 +96,7 @@
 			isa = PBXGroup;
 			children = (
 				A2000010 /* DiffPopupView.swift */,
+				A2000014 /* GrammarPopupView.swift */,
 				A2000011 /* SettingsView.swift */,
 			);
 			path = Views;
@@ -184,6 +187,7 @@
 				A1000009 /* DiffCalculator.swift in Sources */,
 				A1000010 /* DiffPopupView.swift in Sources */,
 				A1000011 /* SettingsView.swift in Sources */,
+				A1000012 /* GrammarPopupView.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

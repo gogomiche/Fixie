@@ -56,7 +56,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     @objc func triggerGrammarCheck() {
-        print("[Fixie] triggerGrammarCheck called")
+        print("[Fixie] triggerGrammarCheck called, isProcessing=\(isProcessing)")
 
         // Prevent race conditions - ignore if already processing
         guard !isProcessing else {
@@ -235,9 +235,12 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         diffWindow?.close()
         diffWindow = nil
 
-        let diffView = StreamingDiffPopupView(
+        let providerName = getProviderDisplayName()
+
+        let popupView = StreamingGrammarPopupView(
             originalText: original,
             streamingState: streamingState,
+            providerName: providerName,
             onAccept: { [weak self] in
                 self?.acceptCorrection()
             },
@@ -246,30 +249,37 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             }
         )
 
-        let hostingView = NSHostingView(rootView: diffView)
+        let hostingView = NSHostingView(rootView: popupView)
 
         // Calculate window size based on content
-        let width: CGFloat = 500
-        let height: CGFloat = min(400, max(150, CGFloat(original.count / 2) + 100))
+        let width: CGFloat = 600
+        let height: CGFloat = min(500, max(250, CGFloat(original.count / 2) + 150))
 
-        let window = NSWindow(
+        // Create borderless floating panel
+        let window = NSPanel(
             contentRect: NSRect(x: 0, y: 0, width: width, height: height),
-            styleMask: [.titled, .closable, .resizable],
+            styleMask: [.borderless, .nonactivatingPanel],
             backing: .buffered,
             defer: false
         )
 
         window.contentView = hostingView
-        window.title = "Fixie - Grammar Check"
+        window.backgroundColor = .clear
+        window.isOpaque = false
+        window.hasShadow = true
         window.level = .floating
+        window.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
+        window.isMovableByWindowBackground = true
         window.center()
         window.makeKeyAndOrderFront(nil)
 
         // Handle keyboard events
         eventMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
             guard let self = self else { return event }
-            if event.keyCode == 36 && self.streamingState.isComplete { // Enter key
-                self.acceptCorrection()
+            if event.keyCode == 36 { // Enter key
+                if self.streamingState.isComplete {
+                    self.acceptCorrection()
+                }
                 return nil
             } else if event.keyCode == 53 { // Escape key
                 self.closeDiffWindow()
@@ -282,69 +292,96 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         NSApp.activate(ignoringOtherApps: true)
     }
 
+    private func getProviderDisplayName() -> String {
+        switch settingsManager.selectedProvider {
+        case .claude:
+            return "Claude Sonnet"
+        case .openai:
+            return "GPT-4o mini"
+        case .ollama:
+            return settingsManager.ollamaModel
+        }
+    }
+
     private func acceptCorrection() {
         guard !currentCorrectedText.isEmpty else {
             print("[Fixie] acceptCorrection called but correctedText is empty, ignoring")
             return
         }
 
-        // Capture the text we need to paste (avoid race conditions)
+        // Capture the text we need to paste and the element to paste to
         let textToPaste = currentCorrectedText
+        let elementToUse = savedFocusedElement
         print("[Fixie] acceptCorrection called with: \(textToPaste.prefix(50))...")
 
-        // Defer to avoid crash when called from event monitor callback
+        // Reset state immediately - we're done with the grammar check flow
+        // This allows a new trigger to work even if the paste is still in progress
+        isProcessing = false
+        currentCorrectedText = ""
+        savedFocusedElement = nil
+        print("[Fixie] State reset, isProcessing=\(isProcessing)")
+
+        // Remove event monitor
+        if let monitor = eventMonitor {
+            NSEvent.removeMonitor(monitor)
+            eventMonitor = nil
+        }
+
+        // Hide window immediately
+        diffWindow?.orderOut(nil)
+
+        // Defer the rest to avoid crash when called from event monitor callback
         DispatchQueue.main.async { [weak self] in
             guard let self = self else { return }
 
-            // Remove event monitor first
-            if let monitor = self.eventMonitor {
-                NSEvent.removeMonitor(monitor)
-                self.eventMonitor = nil
-            }
-            print("[Fixie] Event monitor removed")
-
-            // Just hide the window (orderOut), don't close it yet - closing triggers SwiftUI crash
-            self.diffWindow?.orderOut(nil)
-            print("[Fixie] Window hidden")
-
             // Deactivate our app to return focus to previous app
             NSApp.deactivate()
-            print("[Fixie] App deactivated")
 
             // Small delay to let the system settle, then write text
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) { [weak self] in
                 guard let self = self else { return }
 
                 // Try Accessibility API first using saved element (doesn't touch clipboard)
-                if self.setSelectedTextViaAccessibility(textToPaste) {
-                    print("[Fixie] Text replaced via Accessibility API")
-                    self.restoreClipboard()
-                } else {
-                    // Fall back to clipboard + paste
-                    print("[Fixie] Falling back to clipboard + paste")
-                    let pasteboard = NSPasteboard.general
-                    pasteboard.clearContents()
-                    pasteboard.setString(textToPaste, forType: .string)
-
-                    self.simulatePaste()
-                    print("[Fixie] Paste simulated")
-
-                    // Restore original clipboard after paste completes
-                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { [weak self] in
-                        self?.restoreClipboard()
-                        print("[Fixie] Clipboard restored")
+                if let element = elementToUse {
+                    let setResult = AXUIElementSetAttributeValue(
+                        element,
+                        kAXSelectedTextAttribute as CFString,
+                        textToPaste as CFTypeRef
+                    )
+                    if setResult == .success {
+                        print("[Fixie] Text replaced via Accessibility API")
+                        self.restoreClipboard()
+                        self.closeWindowDeferred()
+                        return
                     }
+                    print("[Fixie] Accessibility write failed (error: \(setResult.rawValue))")
                 }
 
-                // Close window and reset state
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) { [weak self] in
-                    self?.diffWindow?.close()
-                    self?.diffWindow = nil
-                    self?.isProcessing = false
-                    self?.savedFocusedElement = nil
-                    print("[Fixie] Window closed (deferred)")
+                // Fall back to clipboard + paste
+                print("[Fixie] Falling back to clipboard + paste")
+                let pasteboard = NSPasteboard.general
+                pasteboard.clearContents()
+                pasteboard.setString(textToPaste, forType: .string)
+
+                self.simulatePaste()
+                print("[Fixie] Paste simulated")
+
+                // Restore original clipboard after paste completes
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { [weak self] in
+                    self?.restoreClipboard()
+                    print("[Fixie] Clipboard restored")
                 }
+
+                self.closeWindowDeferred()
             }
+        }
+    }
+
+    private func closeWindowDeferred() {
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) { [weak self] in
+            self?.diffWindow?.close()
+            self?.diffWindow = nil
+            print("[Fixie] Window closed")
         }
     }
 

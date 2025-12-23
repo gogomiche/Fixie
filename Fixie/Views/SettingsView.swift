@@ -1,34 +1,67 @@
 import SwiftUI
 import ServiceManagement
 
+enum SettingsTab: String, CaseIterable {
+    case general = "General"
+    case llm = "LLM Provider"
+    case hotkey = "Hotkey"
+    case about = "About"
+
+    var icon: String {
+        switch self {
+        case .general: return "gear"
+        case .llm: return "brain"
+        case .hotkey: return "keyboard"
+        case .about: return "info.circle"
+        }
+    }
+}
+
 struct SettingsView: View {
     @EnvironmentObject var settings: SettingsManager
     @State private var isRecordingHotkey = false
+    @State private var selectedTab: SettingsTab = .general
 
     var body: some View {
-        TabView {
-            generalTab
-                .tabItem {
-                    Label("General", systemImage: "gear")
+        HStack(spacing: 0) {
+            // Sidebar
+            VStack(spacing: 4) {
+                ForEach(SettingsTab.allCases, id: \.self) { tab in
+                    SidebarButton(
+                        title: tab.rawValue,
+                        icon: tab.icon,
+                        isSelected: selectedTab == tab
+                    ) {
+                        selectedTab = tab
+                    }
                 }
+                Spacer()
+            }
+            .padding(12)
+            .frame(width: 160)
+            .background(Color(NSColor.controlBackgroundColor))
 
-            llmTab
-                .tabItem {
-                    Label("LLM Provider", systemImage: "brain")
-                }
+            Divider()
 
-            hotkeyTab
-                .tabItem {
-                    Label("Hotkey", systemImage: "keyboard")
+            // Content
+            ScrollView {
+                VStack(alignment: .leading) {
+                    switch selectedTab {
+                    case .general:
+                        generalTab
+                    case .llm:
+                        llmTab
+                    case .hotkey:
+                        hotkeyTab
+                    case .about:
+                        aboutTab
+                    }
                 }
-
-            aboutTab
-                .tabItem {
-                    Label("About", systemImage: "info.circle")
-                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
-        .padding(20)
-        .frame(width: 450, height: 350)
+        .frame(width: 550, height: 400)
     }
 
     private var generalTab: some View {
@@ -230,6 +263,38 @@ class HotkeyRecorderNSView: NSView {
 
 extension Notification.Name {
     static let hotkeyChanged = Notification.Name("hotkeyChanged")
+}
+
+struct SidebarButton: View {
+    let title: String
+    let icon: String
+    let isSelected: Bool
+    let action: () -> Void
+
+    @State private var isHovering = false
+
+    var body: some View {
+        Button(action: action) {
+            HStack(spacing: 10) {
+                Image(systemName: icon)
+                    .font(.system(size: 14))
+                    .frame(width: 20)
+                    .foregroundColor(isSelected ? .accentColor : .secondary)
+                Text(title)
+                    .font(.system(size: 13, weight: isSelected ? .medium : .regular))
+                    .foregroundColor(isSelected ? .primary : .secondary)
+                Spacer()
+            }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 8)
+            .background(
+                RoundedRectangle(cornerRadius: 6)
+                    .fill(isSelected ? Color.accentColor.opacity(0.15) : (isHovering ? Color.primary.opacity(0.05) : Color.clear))
+            )
+        }
+        .buttonStyle(.plain)
+        .onHover { isHovering = $0 }
+    }
 }
 
 #Preview {
