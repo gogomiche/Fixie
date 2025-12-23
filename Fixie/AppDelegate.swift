@@ -17,6 +17,11 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     var currentCorrectedText: String = ""
     var streamingState = StreamingState()
     var eventMonitor: Any?
+    var savedClipboardContent: String?
+    var usedAccessibilityForRead: Bool = false
+    var isProcessing: Bool = false  // Prevent race conditions from multiple triggers
+    var currentTask: Task<Void, Never>?  // Track current streaming task for cancellation
+    var savedFocusedElement: AXUIElement?  // Save the original focused element to write back to
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         setupHotkey()
@@ -53,6 +58,12 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     @objc func triggerGrammarCheck() {
         print("[Fixie] triggerGrammarCheck called")
 
+        // Prevent race conditions - ignore if already processing
+        guard !isProcessing else {
+            print("[Fixie] Already processing, ignoring trigger")
+            return
+        }
+
         // Check accessibility permissions first
         let trusted = AXIsProcessTrusted()
         print("[Fixie] Accessibility trusted: \(trusted)")
@@ -75,11 +86,24 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             return
         }
 
-        // Get selected text by simulating Cmd+C
-        let pasteboard = NSPasteboard.general
-        let oldContent = pasteboard.string(forType: .string)
+        // Try Accessibility API first (doesn't touch clipboard)
+        if let selectedText = getSelectedTextViaAccessibility() {
+            print("[Fixie] Got text via Accessibility API")
+            usedAccessibilityForRead = true
+            currentOriginalText = selectedText
+            checkGrammar(text: selectedText)
+            return
+        }
 
-        // Clear and copy
+        // Fall back to clipboard simulation
+        print("[Fixie] Falling back to clipboard simulation")
+        usedAccessibilityForRead = false
+
+        // Save current clipboard content to restore later if user cancels
+        let pasteboard = NSPasteboard.general
+        savedClipboardContent = pasteboard.string(forType: .string)
+
+        // Clear and copy selected text
         pasteboard.clearContents()
         simulateCopy()
 
@@ -90,15 +114,12 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             let newContent = pasteboard.string(forType: .string)
             print("[Fixie] Clipboard content after copy: \(newContent ?? "nil")")
 
-            if let selectedText = newContent, !selectedText.isEmpty, selectedText != oldContent {
+            if let selectedText = newContent, !selectedText.isEmpty, selectedText != self.savedClipboardContent {
                 self.currentOriginalText = selectedText
                 self.checkGrammar(text: selectedText)
             } else {
-                // Restore old clipboard content
-                if let old = oldContent {
-                    pasteboard.clearContents()
-                    pasteboard.setString(old, forType: .string)
-                }
+                // Restore original clipboard content
+                self.restoreClipboard()
                 // Show alert instead of notification for better visibility
                 let alert = NSAlert()
                 alert.messageText = "No Text Selected"
@@ -112,70 +133,107 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func simulateCopy() {
-        // Source can be nil - CGEvent still works without it
-        let source = CGEventSource(stateID: .hidSystemState)
+        // Create a new event source for each operation
+        let source = CGEventSource(stateID: .combinedSessionState)
 
-        // Key down
-        if let keyDown = CGEvent(keyboardEventSource: source, virtualKey: CGKeyCode(kVK_ANSI_C), keyDown: true) {
-            keyDown.flags = .maskCommand
-            keyDown.post(tap: .cghidEventTap)
+        // Create both events upfront
+        guard let keyDown = CGEvent(keyboardEventSource: source, virtualKey: CGKeyCode(kVK_ANSI_C), keyDown: true),
+              let keyUp = CGEvent(keyboardEventSource: source, virtualKey: CGKeyCode(kVK_ANSI_C), keyDown: false) else {
+            print("[Fixie] ERROR: Could not create CGEvent for copy")
+            return
         }
 
-        // Key up
-        if let keyUp = CGEvent(keyboardEventSource: source, virtualKey: CGKeyCode(kVK_ANSI_C), keyDown: false) {
-            keyUp.flags = .maskCommand
-            keyUp.post(tap: .cghidEventTap)
-        }
+        // Set command modifier
+        keyDown.flags = .maskCommand
+        keyUp.flags = .maskCommand
+
+        // Post key down
+        keyDown.post(tap: .cgSessionEventTap)
+
+        // Small delay between key down and up
+        Thread.sleep(forTimeInterval: 0.02)  // 20ms
+
+        // Post key up
+        keyUp.post(tap: .cgSessionEventTap)
     }
 
     private func checkGrammar(text: String) {
         print("[Fixie] checkGrammar called with: \(text)")
         print("[Fixie] Using provider: \(settingsManager.selectedProvider)")
 
+        // Cancel any existing task
+        currentTask?.cancel()
+
+        // Mark as processing
+        isProcessing = true
+
         let llmService = LLMServiceFactory.create(provider: settingsManager.selectedProvider, settings: settingsManager)
 
         // Reset streaming state and show window
         streamingState.text = ""
         streamingState.isComplete = false
+        currentCorrectedText = ""  // Also reset this to prevent stale data
         showDiffWindow(original: text)
 
-        Task {
+        currentTask = Task { @MainActor [weak self] in
+            guard let self = self else { return }
+
+            defer {
+                // Always reset processing state when done
+                self.isProcessing = false
+                self.currentTask = nil
+            }
+
             do {
+                // Check for cancellation
+                try Task.checkCancellation()
+
                 print("[Fixie] Calling LLM API with streaming...")
                 var fullText = ""
 
                 for try await chunk in llmService.correctGrammarStreaming(text: text) {
+                    // Check for cancellation between chunks
+                    try Task.checkCancellation()
                     fullText += chunk
-                    await MainActor.run {
-                        self.streamingState.text = fullText
-                    }
+                    self.streamingState.text = fullText
                 }
+
+                // Final cancellation check before completing
+                try Task.checkCancellation()
 
                 let correctedText = fullText.trimmingCharacters(in: .whitespacesAndNewlines)
                 print("[Fixie] Got response: \(correctedText)")
-                await MainActor.run {
-                    self.currentCorrectedText = correctedText
-                    self.streamingState.text = correctedText
-                    self.streamingState.isComplete = true
-                }
+                self.currentCorrectedText = correctedText
+                self.streamingState.text = correctedText
+                self.streamingState.isComplete = true
+            } catch is CancellationError {
+                print("[Fixie] Task was cancelled")
+                // Don't show error for cancellation
             } catch {
                 print("[Fixie] API Error: \(error)")
-                await MainActor.run {
-                    self.closeDiffWindow()
-                    let alert = NSAlert()
-                    alert.messageText = "Fixie Error"
-                    alert.informativeText = error.localizedDescription
-                    alert.alertStyle = .critical
-                    alert.addButton(withTitle: "OK")
-                    NSApp.activate(ignoringOtherApps: true)
-                    alert.runModal()
-                }
+                self.closeDiffWindow()
+                let alert = NSAlert()
+                alert.messageText = "Fixie Error"
+                alert.informativeText = error.localizedDescription
+                alert.alertStyle = .critical
+                alert.addButton(withTitle: "OK")
+                NSApp.activate(ignoringOtherApps: true)
+                alert.runModal()
             }
         }
     }
 
     private func showDiffWindow(original: String) {
-        closeDiffWindow()
+        // Close any existing window without clearing savedFocusedElement
+        // (we need it for writing back later)
+        currentTask?.cancel()
+        currentTask = nil
+        if let monitor = eventMonitor {
+            NSEvent.removeMonitor(monitor)
+            eventMonitor = nil
+        }
+        diffWindow?.close()
+        diffWindow = nil
 
         let diffView = StreamingDiffPopupView(
             originalText: original,
@@ -225,51 +283,219 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func acceptCorrection() {
-        guard !currentCorrectedText.isEmpty else { return }
+        guard !currentCorrectedText.isEmpty else {
+            print("[Fixie] acceptCorrection called but correctedText is empty, ignoring")
+            return
+        }
 
-        // Copy corrected text to clipboard
-        let pasteboard = NSPasteboard.general
-        pasteboard.clearContents()
-        pasteboard.setString(currentCorrectedText, forType: .string)
+        // Capture the text we need to paste (avoid race conditions)
+        let textToPaste = currentCorrectedText
+        print("[Fixie] acceptCorrection called with: \(textToPaste.prefix(50))...")
 
-        // Defer window close to avoid crash when called from event monitor callback
+        // Defer to avoid crash when called from event monitor callback
         DispatchQueue.main.async { [weak self] in
-            self?.closeDiffWindow()
+            guard let self = self else { return }
 
-            // Hide our app to return focus to the previous app
-            NSApp.hide(nil)
+            // Remove event monitor first
+            if let monitor = self.eventMonitor {
+                NSEvent.removeMonitor(monitor)
+                self.eventMonitor = nil
+            }
+            print("[Fixie] Event monitor removed")
 
-            // Simulate paste after focus returns
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) { [weak self] in
-                self?.simulatePaste()
+            // Just hide the window (orderOut), don't close it yet - closing triggers SwiftUI crash
+            self.diffWindow?.orderOut(nil)
+            print("[Fixie] Window hidden")
+
+            // Deactivate our app to return focus to previous app
+            NSApp.deactivate()
+            print("[Fixie] App deactivated")
+
+            // Small delay to let the system settle, then write text
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) { [weak self] in
+                guard let self = self else { return }
+
+                // Try Accessibility API first using saved element (doesn't touch clipboard)
+                if self.setSelectedTextViaAccessibility(textToPaste) {
+                    print("[Fixie] Text replaced via Accessibility API")
+                    self.restoreClipboard()
+                } else {
+                    // Fall back to clipboard + paste
+                    print("[Fixie] Falling back to clipboard + paste")
+                    let pasteboard = NSPasteboard.general
+                    pasteboard.clearContents()
+                    pasteboard.setString(textToPaste, forType: .string)
+
+                    self.simulatePaste()
+                    print("[Fixie] Paste simulated")
+
+                    // Restore original clipboard after paste completes
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { [weak self] in
+                        self?.restoreClipboard()
+                        print("[Fixie] Clipboard restored")
+                    }
+                }
+
+                // Close window and reset state
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) { [weak self] in
+                    self?.diffWindow?.close()
+                    self?.diffWindow = nil
+                    self?.isProcessing = false
+                    self?.savedFocusedElement = nil
+                    print("[Fixie] Window closed (deferred)")
+                }
             }
         }
     }
 
     private func simulatePaste() {
-        // Source can be nil - CGEvent still works without it
-        let source = CGEventSource(stateID: .hidSystemState)
+        // Create a new event source for each operation
+        let source = CGEventSource(stateID: .combinedSessionState)
+        print("[Fixie] simulatePaste - source: \(source != nil ? "created" : "nil")")
 
-        // Key down
-        if let keyDown = CGEvent(keyboardEventSource: source, virtualKey: CGKeyCode(kVK_ANSI_V), keyDown: true) {
-            keyDown.flags = .maskCommand
-            keyDown.post(tap: .cghidEventTap)
+        // Create both events upfront
+        guard let keyDown = CGEvent(keyboardEventSource: source, virtualKey: CGKeyCode(kVK_ANSI_V), keyDown: true),
+              let keyUp = CGEvent(keyboardEventSource: source, virtualKey: CGKeyCode(kVK_ANSI_V), keyDown: false) else {
+            print("[Fixie] ERROR: Could not create CGEvent for paste")
+            return
         }
 
-        // Key up
-        if let keyUp = CGEvent(keyboardEventSource: source, virtualKey: CGKeyCode(kVK_ANSI_V), keyDown: false) {
-            keyUp.flags = .maskCommand
-            keyUp.post(tap: .cghidEventTap)
-        }
+        // Set command modifier
+        keyDown.flags = .maskCommand
+        keyUp.flags = .maskCommand
+
+        // Post key down
+        keyDown.post(tap: .cgSessionEventTap)
+        print("[Fixie] Cmd+V keyDown posted")
+
+        // Use RunLoop-friendly delay instead of blocking usleep
+        Thread.sleep(forTimeInterval: 0.02)  // 20ms
+
+        // Post key up
+        keyUp.post(tap: .cgSessionEventTap)
+        print("[Fixie] Cmd+V keyUp posted")
     }
 
     private func closeDiffWindow() {
+        // Cancel any ongoing task
+        currentTask?.cancel()
+        currentTask = nil
+
         if let monitor = eventMonitor {
             NSEvent.removeMonitor(monitor)
             eventMonitor = nil
         }
         diffWindow?.close()
         diffWindow = nil
+
+        // Reset processing state
+        isProcessing = false
+
+        // Clear saved accessibility element
+        savedFocusedElement = nil
+
+        // Restore original clipboard content when user cancels
+        restoreClipboard()
+    }
+
+    private func restoreClipboard() {
+        let pasteboard = NSPasteboard.general
+        pasteboard.clearContents()
+        if let saved = savedClipboardContent {
+            pasteboard.setString(saved, forType: .string)
+        }
+        savedClipboardContent = nil
+    }
+
+    // MARK: - Accessibility API Methods
+
+    private func getSelectedTextViaAccessibility() -> String? {
+        let systemWide = AXUIElementCreateSystemWide()
+        var focusedElement: CFTypeRef?
+
+        let focusResult = AXUIElementCopyAttributeValue(
+            systemWide,
+            kAXFocusedUIElementAttribute as CFString,
+            &focusedElement
+        )
+
+        guard focusResult == .success, let element = focusedElement else {
+            print("[Fixie] Accessibility: Could not get focused element")
+            return nil
+        }
+
+        // Safe cast - CFTypeRef to AXUIElement
+        let axElement = element as! AXUIElement  // This is safe because AXUIElementCopyAttributeValue for kAXFocusedUIElementAttribute always returns AXUIElement
+
+        var selectedText: CFTypeRef?
+        let textResult = AXUIElementCopyAttributeValue(
+            axElement,
+            kAXSelectedTextAttribute as CFString,
+            &selectedText
+        )
+
+        guard textResult == .success, let text = selectedText as? String, !text.isEmpty else {
+            print("[Fixie] Accessibility: Could not get selected text")
+            return nil
+        }
+
+        // Save the focused element for later use when writing back
+        savedFocusedElement = axElement
+        print("[Fixie] Accessibility: Saved focused element for later")
+
+        print("[Fixie] Accessibility: Got selected text: \(text.prefix(50))...")
+        return text
+    }
+
+    private func setSelectedTextViaAccessibility(_ text: String) -> Bool {
+        // First, try to use the saved focused element (most reliable)
+        if let savedElement = savedFocusedElement {
+            let setResult = AXUIElementSetAttributeValue(
+                savedElement,
+                kAXSelectedTextAttribute as CFString,
+                text as CFTypeRef
+            )
+
+            if setResult == .success {
+                print("[Fixie] Accessibility: Successfully set selected text via saved element")
+                savedFocusedElement = nil  // Clear after use
+                return true
+            } else {
+                print("[Fixie] Accessibility: Failed to set via saved element (error: \(setResult.rawValue)), trying current focus")
+            }
+        }
+
+        // Fall back to getting current focused element
+        let systemWide = AXUIElementCreateSystemWide()
+        var focusedElement: CFTypeRef?
+
+        let focusResult = AXUIElementCopyAttributeValue(
+            systemWide,
+            kAXFocusedUIElementAttribute as CFString,
+            &focusedElement
+        )
+
+        guard focusResult == .success, let element = focusedElement else {
+            print("[Fixie] Accessibility: Could not get focused element for writing")
+            return false
+        }
+
+        // Safe cast - CFTypeRef to AXUIElement
+        let axElement = element as! AXUIElement
+
+        let setResult = AXUIElementSetAttributeValue(
+            axElement,
+            kAXSelectedTextAttribute as CFString,
+            text as CFTypeRef
+        )
+
+        if setResult == .success {
+            print("[Fixie] Accessibility: Successfully set selected text via current focus")
+            return true
+        } else {
+            print("[Fixie] Accessibility: Failed to set selected text (error: \(setResult.rawValue))")
+            return false
+        }
     }
 
     private func showNotification(title: String, message: String) {
