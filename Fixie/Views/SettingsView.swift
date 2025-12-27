@@ -186,9 +186,26 @@ struct SettingsView: View {
 
             Divider()
 
-            Link("View on GitHub", destination: URL(string: "https://github.com/gogomiche/Fixie")!)
+            VStack(spacing: 8) {
+                Link("View on GitHub", destination: URL(string: "https://github.com/gogomiche/Fixie")!)
+                Link("Privacy Policy", destination: URL(string: "https://github.com/gogomiche/Fixie/blob/main/PRIVACY.md")!)
+                    .font(.caption)
+            }
 
             Spacer()
+
+            // Privacy summary
+            GroupBox {
+                VStack(alignment: .leading, spacing: 8) {
+                    Label("Privacy Summary", systemImage: "lock.shield")
+                        .font(.headline)
+
+                    Text("Your text is sent only to your chosen AI provider for correction. API keys are stored securely in macOS Keychain. No analytics or usage data is collected.")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+            }
         }
         .padding()
     }

@@ -1,4 +1,5 @@
 import SwiftUI
+import AppKit
 
 /// Raycast-style grammar correction popup
 struct GrammarPopupView: View {
@@ -7,6 +8,7 @@ struct GrammarPopupView: View {
     let isLoading: Bool
     let streamingText: String
     let providerName: String
+    let sourceAppIcon: NSImage?
     let onAccept: () -> Void
     let onReject: () -> Void
 
@@ -36,10 +38,13 @@ struct GrammarPopupView: View {
     var body: some View {
         VStack(spacing: 0) {
             // Header
-            HStack(spacing: 8) {
-                Image(systemName: "text.badge.checkmark")
-                    .font(.system(size: 16))
-                    .foregroundColor(.yellow)
+            HStack(spacing: 10) {
+                if let icon = sourceAppIcon {
+                    Image(nsImage: icon)
+                        .resizable()
+                        .aspectRatio(contentMode: .fit)
+                        .frame(width: 28, height: 28)
+                }
                 Text("Fix Spelling and Grammar")
                     .font(.system(size: 14, weight: .medium))
                     .foregroundColor(.white.opacity(0.9))
@@ -118,9 +123,6 @@ struct GrammarPopupView: View {
                 .background(Color.white.opacity(0.02))
             }
 
-            Divider()
-                .background(Color.white.opacity(0.15))
-
             // Action bar
             HStack {
                 Button(action: onReject) {
@@ -167,11 +169,7 @@ struct GrammarPopupView: View {
         }
         .frame(minWidth: 500, minHeight: 300)
         .background(Color(red: 0.11, green: 0.11, blue: 0.13))
-        .cornerRadius(14)
-        .overlay(
-            RoundedRectangle(cornerRadius: 14)
-                .stroke(Color.white.opacity(0.12), lineWidth: 1)
-        )
+        .clipShape(RoundedRectangle(cornerRadius: 20))
         .shadow(color: .black.opacity(0.6), radius: 30, x: 0, y: 15)
     }
 
@@ -243,6 +241,7 @@ struct StreamingGrammarPopupView: View {
     let originalText: String
     @ObservedObject var streamingState: StreamingState
     let providerName: String
+    let sourceAppIcon: NSImage?
     let onAccept: () -> Void
     let onReject: () -> Void
 
@@ -253,6 +252,7 @@ struct StreamingGrammarPopupView: View {
             isLoading: !streamingState.isComplete,
             streamingText: streamingState.text,
             providerName: providerName,
+            sourceAppIcon: sourceAppIcon,
             onAccept: streamingState.isComplete ? onAccept : {},
             onReject: onReject
         )
@@ -269,6 +269,7 @@ struct StreamingGrammarPopupView: View {
             return state
         }(),
         providerName: "GPT-4o mini",
+        sourceAppIcon: NSImage(systemSymbolName: "doc.text", accessibilityDescription: nil),
         onAccept: {},
         onReject: {}
     )

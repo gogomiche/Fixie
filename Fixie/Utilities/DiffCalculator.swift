@@ -16,21 +16,12 @@ struct DiffSegment: Identifiable {
 class DiffCalculator {
     /// Calculates word-level diff between original and corrected text
     static func calculateDiff(original: String, corrected: String) -> [DiffSegment] {
-        // Normalize both texts to avoid whitespace-only differences
         let normalizedOriginal = original.trimmingCharacters(in: .whitespacesAndNewlines)
         let normalizedCorrected = corrected.trimmingCharacters(in: .whitespacesAndNewlines)
 
-        print("[Fixie] calculateDiff - original: '\(normalizedOriginal.prefix(50))...'")
-        print("[Fixie] calculateDiff - corrected: '\(normalizedCorrected.prefix(50))...'")
-
         let originalWords = tokenize(normalizedOriginal)
         let correctedWords = tokenize(normalizedCorrected)
-
-        print("[Fixie] originalWords count: \(originalWords.count), first 5: \(originalWords.prefix(5))")
-        print("[Fixie] correctedWords count: \(correctedWords.count), first 5: \(correctedWords.prefix(5))")
-
         let lcs = longestCommonSubsequence(originalWords, correctedWords)
-        print("[Fixie] LCS count: \(lcs.count), first 5: \(lcs.prefix(5))")
 
         var result: [DiffSegment] = []
 
