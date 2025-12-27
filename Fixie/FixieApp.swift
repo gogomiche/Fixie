@@ -21,11 +21,7 @@ struct FixieApp: App {
             }
             .keyboardShortcut("q", modifiers: .command)
         } label: {
-            Image("MenuBarIcon")
-                .resizable()
-                .renderingMode(.original)
-                .aspectRatio(contentMode: .fit)
-                .frame(height: 18)
+            Image(systemName: "bicycle")
         }
     }
 }

@@ -89,19 +89,3 @@ brew install --cask fixie
 ### Ollama not working
 - Ensure Ollama is running (`ollama serve`)
 - Verify the model is downloaded (`ollama pull llama3.2`)
-
-## Contributing
-
-Contributions are welcome! Please:
-
-1. Fork the repository
-2. Create a feature branch (`git checkout -b feature/amazing-feature`)
-3. Commit your changes (`git commit -m 'Add amazing feature'`)
-4. Push to the branch (`git push origin feature/amazing-feature`)
-5. Open a Pull Request
-
-
-## Acknowledgments
-
-- Inspired by [Raycast](https://raycast.com/) grammar fix feature
-- Built with SwiftUI and native macOS APIs
