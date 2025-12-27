@@ -11,7 +11,6 @@ A lightweight macOS menu bar app for instant grammar and spelling correction. Se
 - **Global Hotkey**: Trigger grammar check from any app (default: `⌥⌘G`)
 - **Visual Diff**: See exactly what changed with color-coded additions and removals
 - **Multiple LLM Providers**: Choose between Claude, OpenAI, or Ollama (local)
-- **Customizable**: Configure hotkey, API keys, and more in settings
 - **Lightweight**: Native SwiftUI app with minimal resource usage
 - **Privacy-First**: Ollama option keeps all data on your machine
 
@@ -61,27 +60,6 @@ brew install --cask fixie
    - Green highlight = added text
 4. **Press Enter** to accept and replace, or **Escape** to cancel
 
-## Configuration
-
-Access settings via the menu bar icon → Settings:
-
-| Setting | Description |
-|---------|-------------|
-| LLM Provider | Choose Claude, OpenAI, or Ollama |
-| API Key | Your API key for cloud providers |
-| Ollama Endpoint | Local endpoint (default: `http://localhost:11434`) |
-| Ollama Model | Model name (default: `llama3.2`) |
-| Global Hotkey | Customize the trigger shortcut |
-| Launch at Login | Start Fixie automatically |
-
-## Keyboard Shortcuts
-
-| Shortcut | Action |
-|----------|--------|
-| `⌥⌘G` | Trigger grammar check (customizable) |
-| `Enter` | Accept corrections |
-| `Escape` | Cancel / close popup |
-
 ## Requirements
 
 - macOS 13.0 (Ventura) or later
@@ -122,9 +100,6 @@ Contributions are welcome! Please:
 4. Push to the branch (`git push origin feature/amazing-feature`)
 5. Open a Pull Request
 
-## License
-
-MIT License - see [LICENSE](LICENSE) for details.
 
 ## Acknowledgments
 
