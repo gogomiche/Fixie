@@ -19,8 +19,13 @@ A lightweight macOS menu bar app for instant grammar and spelling correction. Se
 ### Option 1: Download Release
 
 1. Download the latest `.dmg` from [Releases](https://github.com/gogomiche/Fixie/releases)
-2. Drag `Fixie.app` to your Applications folder
-3. Open Fixie and grant Accessibility permissions when prompted
+2. Open the DMG and drag `Fixie.app` to your Applications folder
+3. **Important**: On first launch, macOS will block the app because it isn't notarized. To open it:
+   ```bash
+   xattr -cr /Applications/Fixie.app
+   ```
+   Or: System Settings → Privacy & Security → scroll down → click "Open Anyway"
+4. Grant Accessibility permissions when prompted
 
 ### Option 2: Build from Source
 
@@ -89,3 +94,4 @@ brew install --cask fixie
 ### Ollama not working
 - Ensure Ollama is running (`ollama serve`)
 - Verify the model is downloaded (`ollama pull llama3.2`)
+- Use the **exact model name** from `ollama list` (e.g., `llama3.2:3b`, not just `llama3.2`)

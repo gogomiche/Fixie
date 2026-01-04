@@ -20,6 +20,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     var usedAccessibilityForRead: Bool = false
     var isProcessing: Bool = false
     var currentTask: Task<Void, Never>?
+    var previousApp: NSRunningApplication?  // Saved BEFORE showing popup
 
     // Managers
     private let accessibilityManager = AccessibilityManager.shared
@@ -59,27 +60,40 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             return
         }
 
+        // Save the frontmost app BEFORE showing popup - this is critical for pasting back
+        previousApp = NSWorkspace.shared.frontmostApplication
+        print("[Fixie] Saved previous app: \(previousApp?.localizedName ?? "nil")")
+
         // Try Accessibility API first
+        print("[Fixie] Trying Accessibility API...")
         if let selectedText = accessibilityManager.getSelectedText() {
+            print("[Fixie] Accessibility API succeeded: \(selectedText.prefix(50))...")
             usedAccessibilityForRead = true
             currentOriginalText = selectedText
             checkGrammar(text: selectedText)
             return
         }
+        print("[Fixie] Accessibility API failed, falling back to clipboard simulation")
 
-        // Fall back to clipboard simulation
+        // Fall back to clipboard simulation via AppleScript
         usedAccessibilityForRead = false
         clipboardManager.saveCurrentContent()
         clipboardManager.clear()
+        print("[Fixie] Simulating Cmd+C...")
         keyboardSimulator.simulateCopy()
 
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) { [weak self] in
+        // Wait for clipboard to be populated
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { [weak self] in
             guard let self = self else { return }
 
-            if let selectedText = self.clipboardManager.getContent(), !selectedText.isEmpty {
+            let clipboardContent = self.clipboardManager.getContent()
+            print("[Fixie] Clipboard content after copy: \(clipboardContent?.prefix(50) ?? "nil")")
+
+            if let selectedText = clipboardContent, !selectedText.isEmpty {
                 self.currentOriginalText = selectedText
                 self.checkGrammar(text: selectedText)
             } else {
+                print("[Fixie] No text in clipboard, showing alert")
                 self.clipboardManager.restoreSavedContent()
                 self.showNoTextSelectedAlert()
             }
@@ -139,16 +153,58 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func acceptCorrection() {
-        guard !currentCorrectedText.isEmpty else { return }
+        guard !currentCorrectedText.isEmpty else {
+            print("[Fixie] acceptCorrection: No corrected text to paste")
+            return
+        }
 
         let textToPaste = currentCorrectedText
         let savedElement = accessibilityManager.getSavedElement()
+        let requiresTypingFallback = accessibilityManager.savedAppRequiresTypingFallback
+
+        // Use the app saved at the start of triggerGrammarCheck(), not the current frontmost app
+        let targetApp = self.previousApp
+
+        print("[Fixie] acceptCorrection: Text to insert: \(textToPaste.prefix(50))...")
+        print("[Fixie] acceptCorrection: Has saved element: \(savedElement != nil)")
+        print("[Fixie] acceptCorrection: Requires typing fallback: \(requiresTypingFallback)")
+        print("[Fixie] acceptCorrection: Target app: \(targetApp?.localizedName ?? "nil")")
 
         // Reset state immediately
         isProcessing = false
         currentCorrectedText = ""
         accessibilityManager.clearSavedElement()
 
+        // For Electron/web apps, use clipboard + paste
+        if requiresTypingFallback {
+            print("[Fixie] Using clipboard + paste for Electron/web app")
+
+            // Set clipboard content FIRST
+            clipboardManager.setContent(textToPaste)
+
+            // Close popup window (this deactivates Fixie)
+            popupManager.closeWindow()
+
+            // Activate the target app to give it keyboard focus
+            if let app = targetApp {
+                print("[Fixie] Activating target app: \(app.localizedName ?? "unknown")")
+                app.activate(options: [.activateIgnoringOtherApps])
+            }
+
+            // Wait for focus to settle, then paste
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) { [weak self] in
+                print("[Fixie] Simulating Cmd+V paste")
+                self?.keyboardSimulator.simulatePaste()
+
+                // Restore clipboard after paste completes
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { [weak self] in
+                    self?.clipboardManager.restoreSavedContent()
+                }
+            }
+            return
+        }
+
+        // For native apps, try Accessibility API first
         popupManager.hideWindow()
 
         DispatchQueue.main.async { [weak self] in
@@ -157,29 +213,38 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) { [weak self] in
                 guard let self = self else { return }
 
-                // Try Accessibility API first
                 if let element = savedElement {
+                    print("[Fixie] Trying to set text via Accessibility API...")
                     let result = AXUIElementSetAttributeValue(
                         element,
                         kAXSelectedTextAttribute as CFString,
                         textToPaste as CFTypeRef
                     )
+                    print("[Fixie] Accessibility API set result: \(result.rawValue)")
                     if result == .success {
+                        print("[Fixie] Accessibility API succeeded!")
                         self.clipboardManager.restoreSavedContent()
                         self.popupManager.closeWindowDeferred()
                         return
                     }
+                    print("[Fixie] Accessibility API failed, falling back to clipboard paste")
                 }
 
-                // Fall back to clipboard + paste
+                // Fallback: clipboard + paste
+                print("[Fixie] Using clipboard + paste fallback")
                 self.clipboardManager.setContent(textToPaste)
-                self.keyboardSimulator.simulatePaste()
 
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { [weak self] in
-                    self?.clipboardManager.restoreSavedContent()
+                if let app = targetApp {
+                    app.activate(options: [.activateIgnoringOtherApps])
                 }
 
-                self.popupManager.closeWindowDeferred()
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) { [weak self] in
+                    self?.keyboardSimulator.simulatePaste()
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { [weak self] in
+                        self?.clipboardManager.restoreSavedContent()
+                    }
+                    self?.popupManager.closeWindowDeferred()
+                }
             }
         }
     }

@@ -5,6 +5,39 @@ final class AccessibilityManager {
     static let shared = AccessibilityManager()
 
     private var savedFocusedElement: AXUIElement?
+    private var savedAppBundleID: String?
+    private var enabledAccessibilityPIDs: Set<pid_t> = []
+
+    /// Apps where Accessibility API write doesn't work (Electron/web-based apps)
+    /// These apps report success for kAXSelectedTextAttribute writes but don't actually update
+    private static let appsRequiringTypingFallback: Set<String> = [
+        // Electron apps
+        "net.whatsapp.WhatsApp",
+        "com.tinyspeck.slackmacgap",  // Slack
+        "com.microsoft.teams",
+        "com.microsoft.teams2",
+        "com.hnc.Discord",
+        "com.spotify.client",
+        "com.figma.Desktop",
+        "com.notion.id",
+        "com.linear",
+        "com.vscodium",
+        "com.microsoft.VSCode",
+        "com.microsoft.VSCodeInsiders",
+        "com.todesktop.230313mzl4w4u92",  // Linear
+        // Browsers (web content)
+        "com.google.Chrome",
+        "com.google.Chrome.canary",
+        "org.chromium.Chromium",
+        "com.brave.Browser",
+        "com.microsoft.edgemac",
+        "com.operasoftware.Opera",
+        "com.vivaldi.Vivaldi",
+        "org.mozilla.firefox",
+        "org.mozilla.firefoxdeveloperedition",
+        "company.thebrowser.Browser",  // Arc
+        "com.apple.Safari",  // Safari web content
+    ]
 
     private init() {}
 
@@ -21,11 +54,49 @@ final class AccessibilityManager {
         AXIsProcessTrustedWithOptions(options as CFDictionary)
     }
 
+    // MARK: - Electron App Support
+
+    /// Enable accessibility on the frontmost application (required for Electron apps)
+    /// See: https://www.electronjs.org/docs/latest/tutorial/accessibility#macos
+    private func enableAccessibilityOnFrontmostApp() {
+        guard let frontApp = NSWorkspace.shared.frontmostApplication else {
+            print("[Accessibility] No frontmost application")
+            return
+        }
+        let pid = frontApp.processIdentifier
+        let appName = frontApp.localizedName ?? "Unknown"
+
+        print("[Accessibility] Frontmost app: \(appName) (PID: \(pid))")
+
+        // Only enable once per app to avoid repeated calls
+        if enabledAccessibilityPIDs.contains(pid) {
+            print("[Accessibility] Already enabled for this app")
+            return
+        }
+
+        let appElement = AXUIElementCreateApplication(pid)
+
+        // Set AXManualAccessibility to true to enable accessibility in Electron apps
+        let result = AXUIElementSetAttributeValue(
+            appElement,
+            "AXManualAccessibility" as CFString,
+            true as CFTypeRef
+        )
+
+        print("[Accessibility] AXManualAccessibility result: \(result.rawValue)")
+
+        if result == .success || result == .attributeUnsupported {
+            // attributeUnsupported means it's not an Electron app, which is fine
+            enabledAccessibilityPIDs.insert(pid)
+        }
+    }
+
     // MARK: - Element Management
 
     /// Clear the saved focused element
     func clearSavedElement() {
         savedFocusedElement = nil
+        savedAppBundleID = nil
     }
 
     /// Check if there's a saved element
@@ -38,11 +109,20 @@ final class AccessibilityManager {
         return savedFocusedElement
     }
 
+    /// Check if the saved app requires typing fallback (Electron/web apps)
+    var savedAppRequiresTypingFallback: Bool {
+        guard let bundleID = savedAppBundleID else { return false }
+        return Self.appsRequiringTypingFallback.contains(bundleID)
+    }
+
     // MARK: - Text Operations
 
     /// Get selected text from the focused element and save the element for later use
     /// - Returns: The selected text, or nil if not available
     func getSelectedText() -> String? {
+        // Enable accessibility on Electron apps (WhatsApp, Slack, etc.)
+        enableAccessibilityOnFrontmostApp()
+
         let systemWide = AXUIElementCreateSystemWide()
         var focusedElement: CFTypeRef?
 
@@ -53,11 +133,13 @@ final class AccessibilityManager {
         )
 
         guard focusResult == .success, let element = focusedElement else {
+            print("[Accessibility] Failed to get focused element: \(focusResult.rawValue)")
             return nil
         }
 
         // Safe cast using CFGetTypeID
         guard CFGetTypeID(element) == AXUIElementGetTypeID() else {
+            print("[Accessibility] Focused element is not an AXUIElement")
             return nil
         }
 
@@ -74,16 +156,22 @@ final class AccessibilityManager {
         guard textResult == .success,
               let textRef = selectedText,
               CFGetTypeID(textRef) == CFStringGetTypeID() else {
+            print("[Accessibility] Failed to get selected text: \(textResult.rawValue)")
             return nil
         }
 
         let text = textRef as! String
         guard !text.isEmpty else {
+            print("[Accessibility] Selected text is empty")
             return nil
         }
 
-        // Save the focused element for later use when writing back
+        print("[Accessibility] Got selected text: \(text.prefix(50))...")
+
+        // Save the focused element and app bundle ID for later use when writing back
         savedFocusedElement = axElement
+        savedAppBundleID = NSWorkspace.shared.frontmostApplication?.bundleIdentifier
+        print("[Accessibility] Saved app bundle ID: \(savedAppBundleID ?? "nil")")
 
         return text
     }
