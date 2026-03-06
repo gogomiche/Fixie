@@ -127,6 +127,12 @@ class SettingsManager: ObservableObject {
     @Published var hotkey: HotkeyConfig {
         didSet { saveNonSecure() }
     }
+    @Published var openAIModel: String {
+        didSet { saveNonSecure() }
+    }
+    @Published var claudeModel: String {
+        didSet { saveNonSecure() }
+    }
     @Published var launchAtLogin: Bool {
         didSet { saveNonSecure() }
     }
@@ -162,6 +168,8 @@ class SettingsManager: ObservableObject {
         static let provider = "selectedProvider"
         static let ollamaEndpoint = "ollamaEndpoint"
         static let ollamaModel = "ollamaModel"
+        static let openAIModel = "openAIModel"
+        static let claudeModel = "claudeModel"
         static let hotkey = "hotkey"
         static let launchAtLogin = "launchAtLogin"
         static let requestTimeout = "requestTimeout"
@@ -179,6 +187,8 @@ class SettingsManager: ObservableObject {
 
         self.ollamaEndpoint = defaults.string(forKey: DefaultsKeys.ollamaEndpoint) ?? "http://localhost:11434"
         self.ollamaModel = defaults.string(forKey: DefaultsKeys.ollamaModel) ?? "llama3.2:3b"
+        self.openAIModel = defaults.string(forKey: DefaultsKeys.openAIModel) ?? "gpt-4o-mini"
+        self.claudeModel = defaults.string(forKey: DefaultsKeys.claudeModel) ?? "claude-sonnet-4-20250514"
         self.launchAtLogin = defaults.bool(forKey: DefaultsKeys.launchAtLogin)
 
         // Load hotkey before other properties that depend on self
@@ -204,6 +214,8 @@ class SettingsManager: ObservableObject {
         defaults.set(selectedProvider.rawValue, forKey: DefaultsKeys.provider)
         defaults.set(ollamaEndpoint, forKey: DefaultsKeys.ollamaEndpoint)
         defaults.set(ollamaModel, forKey: DefaultsKeys.ollamaModel)
+        defaults.set(openAIModel, forKey: DefaultsKeys.openAIModel)
+        defaults.set(claudeModel, forKey: DefaultsKeys.claudeModel)
         defaults.set(launchAtLogin, forKey: DefaultsKeys.launchAtLogin)
         defaults.set(requestTimeout, forKey: DefaultsKeys.requestTimeout)
         defaults.set(maxRetries, forKey: DefaultsKeys.maxRetries)
@@ -256,11 +268,18 @@ class SettingsManager: ObservableObject {
             timeout = requestTimeout
         }
 
+        let model: String?
+        switch selectedProvider {
+        case .openai: model = openAIModel
+        case .claude: model = claudeModel
+        case .ollama: model = ollamaModel
+        }
+
         return ServiceConfiguration(
             provider: selectedProvider,
             apiKey: selectedProvider == .claude ? claudeAPIKey : (selectedProvider == .openai ? openAIAPIKey : nil),
             endpoint: selectedProvider == .ollama ? ollamaEndpoint : nil,
-            model: selectedProvider == .ollama ? ollamaModel : nil,
+            model: model,
             timeout: timeout,
             maxRetries: maxRetries
         )

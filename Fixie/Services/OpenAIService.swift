@@ -2,6 +2,7 @@ import Foundation
 
 final class OpenAIService: BaseLLMService {
     private let apiKey: String
+    private let model: String
 
     override var providerName: String { "OpenAI" }
     override var apiURL: String { "https://api.openai.com/v1/chat/completions" }
@@ -18,8 +19,9 @@ final class OpenAIService: BaseLLMService {
         }
     }
 
-    init(apiKey: String, timeout: TimeInterval = ServiceConfiguration.defaultTimeout) {
+    init(apiKey: String, model: String = "gpt-4o-mini", timeout: TimeInterval = ServiceConfiguration.defaultTimeout) {
         self.apiKey = apiKey
+        self.model = model
         super.init(timeout: timeout)
     }
 
@@ -33,15 +35,29 @@ final class OpenAIService: BaseLLMService {
         request.addValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
     }
 
+    /// Reasoning models (o-series, gpt-5+) use different parameters than classic models
+    private var isReasoningModel: Bool {
+        model.hasPrefix("o1") || model.hasPrefix("o3") || model.hasPrefix("o4") ||
+        model.hasPrefix("gpt-5")
+    }
+
     override func buildRequestBody(text: String, stream: Bool) -> [String: Any] {
         var body: [String: Any] = [
-            "model": "gpt-4o-mini",
+            "model": model,
             "messages": [
-                ["role": "user", "content": "\(grammarPrompt)\(text)"]
-            ],
-            "max_tokens": 4096,
-            "temperature": 0.3
+                ["role": "system", "content": PromptBuilder.systemPrompt],
+                ["role": "user", "content": PromptBuilder.userMessage(for: text)]
+            ]
         ]
+
+        if isReasoningModel {
+            body["max_completion_tokens"] = 4096
+            body["reasoning_effort"] = "low"
+        } else {
+            body["max_tokens"] = 4096
+            body["temperature"] = 0.3
+        }
+
         if stream {
             body["stream"] = true
         }
@@ -56,6 +72,6 @@ final class OpenAIService: BaseLLMService {
               let correctedText = message["content"] as? String else {
             throw LLMError.invalidResponse
         }
-        return correctedText.trimmingCharacters(in: .whitespacesAndNewlines)
+        return PromptBuilder.sanitizeResponse(correctedText)
     }
 }

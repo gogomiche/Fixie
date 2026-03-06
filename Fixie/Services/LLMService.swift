@@ -127,11 +127,13 @@ class LLMServiceFactory {
         case .claude:
             return ClaudeService(
                 apiKey: config.apiKey ?? "",
+                model: config.model ?? "claude-sonnet-4-20250514",
                 timeout: config.timeout
             )
         case .openai:
             return OpenAIService(
                 apiKey: config.apiKey ?? "",
+                model: config.model ?? "gpt-4o-mini",
                 timeout: config.timeout
             )
         case .ollama:
@@ -150,11 +152,13 @@ class LLMServiceFactory {
         case .claude:
             return ClaudeService(
                 apiKey: configuration.apiKey ?? "",
+                model: configuration.model ?? "claude-sonnet-4-20250514",
                 timeout: configuration.timeout
             )
         case .openai:
             return OpenAIService(
                 apiKey: configuration.apiKey ?? "",
+                model: configuration.model ?? "gpt-4o-mini",
                 timeout: configuration.timeout
             )
         case .ollama:
@@ -166,20 +170,6 @@ class LLMServiceFactory {
         }
     }
 }
-
-// MARK: - Grammar Prompt
-
-let grammarPrompt = """
-You are a grammar and spelling correction assistant. Your task is to fix any grammar, spelling, punctuation, and style issues in the provided text.
-
-Rules:
-1. Only fix errors - do not change the meaning or tone
-2. Preserve the original formatting (line breaks, paragraphs)
-3. Keep technical terms, proper nouns, and intentional stylistic choices
-4. Return ONLY the corrected text, nothing else - no explanations, no quotes, no prefixes
-
-Text to correct:
-"""
 
 // MARK: - Input Sanitization
 

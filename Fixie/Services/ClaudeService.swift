@@ -2,6 +2,7 @@ import Foundation
 
 final class ClaudeService: BaseLLMService {
     private let apiKey: String
+    private let model: String
 
     override var providerName: String { "Claude" }
     override var apiURL: String { "https://api.anthropic.com/v1/messages" }
@@ -18,8 +19,9 @@ final class ClaudeService: BaseLLMService {
         }
     }
 
-    init(apiKey: String, timeout: TimeInterval = ServiceConfiguration.defaultTimeout) {
+    init(apiKey: String, model: String = "claude-sonnet-4-20250514", timeout: TimeInterval = ServiceConfiguration.defaultTimeout) {
         self.apiKey = apiKey
+        self.model = model
         super.init(timeout: timeout)
     }
 
@@ -36,10 +38,11 @@ final class ClaudeService: BaseLLMService {
 
     override func buildRequestBody(text: String, stream: Bool) -> [String: Any] {
         var body: [String: Any] = [
-            "model": "claude-sonnet-4-20250514",
+            "model": model,
+            "system": PromptBuilder.systemPrompt,
             "max_tokens": 4096,
             "messages": [
-                ["role": "user", "content": "\(grammarPrompt)\(text)"]
+                ["role": "user", "content": PromptBuilder.userMessage(for: text)]
             ]
         ]
         if stream {
@@ -55,6 +58,6 @@ final class ClaudeService: BaseLLMService {
               let correctedText = firstContent["text"] as? String else {
             throw LLMError.invalidResponse
         }
-        return correctedText.trimmingCharacters(in: .whitespacesAndNewlines)
+        return PromptBuilder.sanitizeResponse(correctedText)
     }
 }

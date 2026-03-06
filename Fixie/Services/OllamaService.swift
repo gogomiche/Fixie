@@ -37,7 +37,8 @@ final class OllamaService: BaseLLMService {
     override func buildRequestBody(text: String, stream: Bool) -> [String: Any] {
         return [
             "model": model,
-            "prompt": "\(grammarPrompt)\(text)",
+            "system": PromptBuilder.systemPrompt,
+            "prompt": PromptBuilder.userMessage(for: text),
             "stream": stream,
             "options": ["temperature": 0.3]
         ]
@@ -48,6 +49,6 @@ final class OllamaService: BaseLLMService {
               let correctedText = json["response"] as? String else {
             throw LLMError.invalidResponse
         }
-        return correctedText.trimmingCharacters(in: .whitespacesAndNewlines)
+        return PromptBuilder.sanitizeResponse(correctedText)
     }
 }

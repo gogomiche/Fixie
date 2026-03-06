@@ -20,6 +20,8 @@ final class AccessibilityManager {
         "com.spotify.client",
         "com.figma.Desktop",
         "com.notion.id",
+        "com.slite.desktop",
+        "com.slite.Slite",
         "com.linear",
         "com.vscodium",
         "com.microsoft.VSCode",
@@ -112,6 +114,15 @@ final class AccessibilityManager {
     /// Check if the saved app requires typing fallback (Electron/web apps)
     var savedAppRequiresTypingFallback: Bool {
         guard let bundleID = savedAppBundleID else { return false }
+        return Self.appsRequiringTypingFallback.contains(bundleID)
+    }
+
+    /// Check if the current frontmost app needs clipboard fallback
+    /// (Electron/web apps where Accessibility API returns garbled text)
+    var frontmostAppRequiresFallback: Bool {
+        guard let bundleID = NSWorkspace.shared.frontmostApplication?.bundleIdentifier else {
+            return false
+        }
         return Self.appsRequiringTypingFallback.contains(bundleID)
     }
 

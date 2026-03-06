@@ -1,12 +1,28 @@
 import Cocoa
 import SwiftUI
 
+/// NSPanel subclass that intercepts key events directly,
+/// allowing the popup to work without activating the app (critical for full-screen).
+private class FixiePanel: NSPanel {
+    var onKeyHandler: ((UInt16) -> Bool)?
+
+    override var canBecomeKey: Bool { true }
+
+    override func sendEvent(_ event: NSEvent) {
+        if event.type == .keyDown,
+           let handler = onKeyHandler,
+           handler(event.keyCode) {
+            return
+        }
+        super.sendEvent(event)
+    }
+}
+
 /// Manages the grammar correction popup window
 class PopupWindowManager {
     static let shared = PopupWindowManager()
 
     private var window: NSWindow?
-    private var keyEventMonitor: Any?
     private var clickEventMonitor: Any?
     private var previousApp: NSRunningApplication?
 
@@ -54,8 +70,8 @@ class PopupWindowManager {
         let width: CGFloat = 600
         let height: CGFloat = min(500, max(250, CGFloat(originalText.count / 2) + 150))
 
-        // Create borderless floating panel
-        let panel = NSPanel(
+        // Create borderless floating panel (FixiePanel handles keys without app activation)
+        let panel = FixiePanel(
             contentRect: NSRect(x: 0, y: 0, width: width, height: height),
             styleMask: [.borderless, .nonactivatingPanel],
             backing: .buffered,
@@ -70,8 +86,11 @@ class PopupWindowManager {
         panel.backgroundColor = .clear
         panel.isOpaque = false
         panel.hasShadow = true
-        panel.level = .floating
-        panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
+        // popUpMenu level (101) ensures the panel appears above full-screen windows
+        panel.level = .popUpMenu
+        // moveToActiveSpace: panel moves to the current space (including full-screen)
+        // so NSApp.activate won't cause a space switch
+        panel.collectionBehavior = [.moveToActiveSpace, .fullScreenAuxiliary]
         panel.isMovableByWindowBackground = true
 
         // Ensure window has no visible border
@@ -81,48 +100,47 @@ class PopupWindowManager {
             contentView.layer?.masksToBounds = true
         }
 
-        panel.center()
-        panel.makeKeyAndOrderFront(nil)
-
-        // Handle keyboard events
-        keyEventMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
-            guard let self = self else { return event }
-            if event.keyCode == 36 { // Enter key
+        // Key handling via panel subclass (no local event monitor needed)
+        panel.onKeyHandler = { [weak self] keyCode in
+            guard let self = self else { return false }
+            switch keyCode {
+            case 36: // Enter
                 if streamingState.isComplete {
                     self.onAccept?()
                 }
-                return nil
-            } else if event.keyCode == 53 { // Escape key
+                return true
+            case 53: // Escape
                 self.onReject?()
-                return nil
+                return true
+            case 48: // Tab
+                NotificationCenter.default.post(name: .toggleMarkdownPreview, object: nil)
+                return true
+            default:
+                return false
             }
-            return event
         }
+
+        panel.center()
+        panel.makeKeyAndOrderFront(nil)
 
         // Handle click outside to close
         clickEventMonitor = NSEvent.addGlobalMonitorForEvents(matching: [.leftMouseDown, .rightMouseDown]) { [weak self] event in
             guard let self = self, let window = self.window else { return }
-            let clickLocation = event.locationInWindow
-            let windowFrame = window.frame
 
-            // Convert screen coordinates
             let screenLocation = NSEvent.mouseLocation
-
-            if !windowFrame.contains(screenLocation) {
+            if !window.frame.contains(screenLocation) {
                 self.onReject?()
             }
         }
 
         window = panel
+        // Activate AFTER the panel is on the current space (moveToActiveSpace)
+        // so macOS doesn't switch to a different space.
         NSApp.activate(ignoringOtherApps: true)
     }
 
     /// Close the popup window
     func closeWindow() {
-        if let monitor = keyEventMonitor {
-            NSEvent.removeMonitor(monitor)
-            keyEventMonitor = nil
-        }
         if let monitor = clickEventMonitor {
             NSEvent.removeMonitor(monitor)
             clickEventMonitor = nil

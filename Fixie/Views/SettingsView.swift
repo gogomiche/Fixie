@@ -106,12 +106,28 @@ struct SettingsView: View {
                 case .claude:
                     SecureField("Claude API Key", text: $settings.claudeAPIKey)
                         .textFieldStyle(.roundedBorder)
+                    Picker("Model", selection: $settings.claudeModel) {
+                        Text("Claude Sonnet 4").tag("claude-sonnet-4-20250514")
+                        Text("Claude Haiku").tag("claude-haiku-4-5-20251001")
+                    }
+                    TextField("Custom model ID", text: $settings.claudeModel)
+                        .textFieldStyle(.roundedBorder)
+                        .font(.caption)
                     Link("Get API Key", destination: URL(string: "https://console.anthropic.com/")!)
                         .font(.caption)
 
                 case .openai:
                     SecureField("OpenAI API Key", text: $settings.openAIAPIKey)
                         .textFieldStyle(.roundedBorder)
+                    Picker("Model", selection: $settings.openAIModel) {
+                        Text("GPT-5.2").tag("gpt-5.2")
+                        Text("GPT-5.2 Mini").tag("gpt-5.2-mini")
+                        Text("GPT-4o").tag("gpt-4o")
+                        Text("GPT-4o Mini").tag("gpt-4o-mini")
+                    }
+                    TextField("Custom model ID", text: $settings.openAIModel)
+                        .textFieldStyle(.roundedBorder)
+                        .font(.caption)
                     Link("Get API Key", destination: URL(string: "https://platform.openai.com/api-keys")!)
                         .font(.caption)
 
@@ -280,6 +296,7 @@ class HotkeyRecorderNSView: NSView {
 
 extension Notification.Name {
     static let hotkeyChanged = Notification.Name("hotkeyChanged")
+    static let toggleMarkdownPreview = Notification.Name("toggleMarkdownPreview")
 }
 
 struct SidebarButton: View {

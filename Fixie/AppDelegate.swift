@@ -64,18 +64,24 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         previousApp = NSWorkspace.shared.frontmostApplication
         print("[Fixie] Saved previous app: \(previousApp?.localizedName ?? "nil")")
 
-        // Try Accessibility API first
-        print("[Fixie] Trying Accessibility API...")
-        if let selectedText = accessibilityManager.getSelectedText() {
-            print("[Fixie] Accessibility API succeeded: \(selectedText.prefix(50))...")
-            usedAccessibilityForRead = true
-            currentOriginalText = selectedText
-            checkGrammar(text: selectedText)
-            return
-        }
-        print("[Fixie] Accessibility API failed, falling back to clipboard simulation")
+        // For Electron/web apps, skip Accessibility API (can return garbled/lowercase text)
+        let useClipboardOnly = accessibilityManager.frontmostAppRequiresFallback
+        print("[Fixie] Frontmost app requires clipboard fallback: \(useClipboardOnly)")
 
-        // Fall back to clipboard simulation via AppleScript
+        // Try Accessibility API first (only for native apps)
+        if !useClipboardOnly {
+            print("[Fixie] Trying Accessibility API...")
+            if let selectedText = accessibilityManager.getSelectedText() {
+                print("[Fixie] Accessibility API succeeded: \(selectedText.prefix(50))...")
+                usedAccessibilityForRead = true
+                currentOriginalText = selectedText
+                checkGrammar(text: selectedText)
+                return
+            }
+            print("[Fixie] Accessibility API failed, falling back to clipboard simulation")
+        }
+
+        // Fall back to clipboard simulation (Cmd+C)
         usedAccessibilityForRead = false
         clipboardManager.saveCurrentContent()
         clipboardManager.clear()
@@ -86,7 +92,8 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { [weak self] in
             guard let self = self else { return }
 
-            let clipboardContent = self.clipboardManager.getContent()
+            // Prefer HTML→markdown from clipboard (preserves formatting from web/Electron apps)
+            let clipboardContent = self.clipboardManager.getContentPreferringMarkdown()
             print("[Fixie] Clipboard content after copy: \(clipboardContent?.prefix(50) ?? "nil")")
 
             if let selectedText = clipboardContent, !selectedText.isEmpty {
@@ -139,7 +146,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                 }
 
                 try Task.checkCancellation()
-                let correctedText = fullText.trimmingCharacters(in: .whitespacesAndNewlines)
+                let correctedText = PromptBuilder.sanitizeResponse(fullText)
                 self.currentCorrectedText = correctedText
                 self.streamingState.text = correctedText
                 self.streamingState.isComplete = true
@@ -261,11 +268,21 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     // MARK: - Helpers
 
     private func getProviderDisplayName() -> String {
+        let modelId: String
         switch settingsManager.selectedProvider {
-        case .claude: return "Claude Sonnet"
-        case .openai: return "GPT-4o mini"
+        case .claude: modelId = settingsManager.claudeModel
+        case .openai: modelId = settingsManager.openAIModel
         case .ollama: return settingsManager.ollamaModel
         }
+        let displayNames: [String: String] = [
+            "gpt-5.2": "GPT-5.2",
+            "gpt-5.2-mini": "GPT-5.2 Mini",
+            "gpt-4o": "GPT-4o",
+            "gpt-4o-mini": "GPT-4o Mini",
+            "claude-sonnet-4-20250514": "Claude Sonnet 4",
+            "claude-haiku-4-5-20251001": "Claude Haiku",
+        ]
+        return displayNames[modelId] ?? modelId
     }
 
     // MARK: - Alerts

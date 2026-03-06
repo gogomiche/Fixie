@@ -13,6 +13,11 @@ struct GrammarPopupView: View {
     let onReject: () -> Void
 
     @State private var isHoveringAccept = false
+    @State private var showRenderedMarkdown = false
+
+    private var isMarkdown: Bool {
+        MarkdownRenderer.containsMarkdown(correctedText)
+    }
 
     private var characterCount: Int {
         correctedText.count
@@ -84,6 +89,13 @@ struct GrammarPopupView: View {
                         }
                         .frame(maxWidth: .infinity, alignment: .center)
                         .padding(.vertical, 20)
+                    } else if showRenderedMarkdown && isMarkdown {
+                        Text(MarkdownRenderer.render(correctedText))
+                            .font(.system(size: 15))
+                            .lineSpacing(6)
+                            .textSelection(.enabled)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .foregroundColor(.white.opacity(0.9))
                     } else {
                         Text(diffText)
                             .font(.system(size: 15))
@@ -110,6 +122,23 @@ struct GrammarPopupView: View {
                     }
 
                     Spacer()
+
+                    // Markdown toggle
+                    if isMarkdown && hasChanges {
+                        Button(action: { showRenderedMarkdown.toggle() }) {
+                            HStack(spacing: 4) {
+                                Image(systemName: showRenderedMarkdown ? "doc.plaintext" : "doc.richtext")
+                                Text(showRenderedMarkdown ? "Diff" : "Preview")
+                            }
+                            .font(.system(size: 11))
+                            .foregroundColor(.white.opacity(0.6))
+                            .padding(.horizontal, 8)
+                            .padding(.vertical, 4)
+                            .background(Color.white.opacity(0.1))
+                            .cornerRadius(4)
+                        }
+                        .buttonStyle(.plain)
+                    }
 
                     // Stats
                     if hasChanges {
@@ -171,11 +200,15 @@ struct GrammarPopupView: View {
         .background(Color(red: 0.11, green: 0.11, blue: 0.13))
         .clipShape(RoundedRectangle(cornerRadius: 20))
         .shadow(color: .black.opacity(0.6), radius: 30, x: 0, y: 15)
+        .onReceive(NotificationCenter.default.publisher(for: .toggleMarkdownPreview)) { _ in
+            if isMarkdown && hasChanges {
+                showRenderedMarkdown.toggle()
+            }
+        }
     }
 
     private var hasChanges: Bool {
-        originalText.trimmingCharacters(in: .whitespacesAndNewlines) !=
-        correctedText.trimmingCharacters(in: .whitespacesAndNewlines)
+        DiffCalculator.hasChanges(original: originalText, corrected: correctedText)
     }
 
     @ViewBuilder
@@ -211,7 +244,14 @@ struct GrammarPopupView: View {
         var changes = 0
 
         for segment in segments {
-            var part = AttributedString(segment.text)
+            // Make newline tokens visible in added/removed segments
+            let displayText: String
+            if segment.type != .unchanged && segment.text.contains("\n") {
+                displayText = segment.text.replacingOccurrences(of: "\n", with: "\u{21B5}\n")
+            } else {
+                displayText = segment.text
+            }
+            var part = AttributedString(displayText)
 
             switch segment.type {
             case .unchanged:

@@ -14,10 +14,25 @@ struct DiffSegment: Identifiable {
 }
 
 class DiffCalculator {
+    /// Normalize line endings and trim trailing whitespace per line
+    static func normalizeLineEndings(_ text: String) -> String {
+        text
+            .replacingOccurrences(of: "\r\n", with: "\n")
+            .components(separatedBy: "\n")
+            .map { line in
+                var s = line
+                while s.hasSuffix(" ") || s.hasSuffix("\t") {
+                    s = String(s.dropLast())
+                }
+                return s
+            }
+            .joined(separator: "\n")
+    }
+
     /// Calculates word-level diff between original and corrected text
     static func calculateDiff(original: String, corrected: String) -> [DiffSegment] {
-        let normalizedOriginal = original.trimmingCharacters(in: .whitespacesAndNewlines)
-        let normalizedCorrected = corrected.trimmingCharacters(in: .whitespacesAndNewlines)
+        let normalizedOriginal = normalizeLineEndings(original)
+        let normalizedCorrected = normalizeLineEndings(corrected)
 
         let originalWords = tokenize(normalizedOriginal)
         let correctedWords = tokenize(normalizedCorrected)
@@ -155,7 +170,6 @@ class DiffCalculator {
 
     /// Check if there are any actual changes
     static func hasChanges(original: String, corrected: String) -> Bool {
-        return original.trimmingCharacters(in: .whitespacesAndNewlines) !=
-               corrected.trimmingCharacters(in: .whitespacesAndNewlines)
+        return normalizeLineEndings(original) != normalizeLineEndings(corrected)
     }
 }
