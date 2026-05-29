@@ -24,20 +24,34 @@ Run the app via Xcode (`open Fixie.xcodeproj`, then ⌘R).
 
 Fixie is a macOS menu bar app for grammar correction using LLMs.
 
+### Modes
+
+Fixie supports two modes via the `GrammarMode` enum (`Fixie/Models/GrammarMode.swift`):
+- **`.grammar`** — default hotkey ⌥⌘F. Strict grammar/spelling correction without changing meaning, tone, or formatting.
+- **`.improve`** — default hotkey ⌥⌘G. Light rewrite for clarity and fluidity.
+
+Each mode has its own base system prompt + a user-editable custom appendix (Settings → Prompts). The appendix is appended at runtime via `PromptBuilder.systemPrompt(for:customAppendix:)`. Settings stores per-mode hotkeys and prompts; `SettingsManager` exposes `hotkey(for:)` and `customPrompt(for:)`.
+
 ### Core Flow
 
-1. User selects text in any app, presses global hotkey (default: ⌥⌘G)
-2. `AppDelegate.triggerGrammarCheck()` captures text via `AccessibilityManager` (preferred) or clipboard fallback (`ClipboardManager` + `KeyboardSimulator.simulateCopy()`)
-3. `LLMServiceFactory.create()` instantiates the configured provider
-4. Streaming response is piped through `StreamingState` (ObservableObject) into `PopupWindowManager`'s floating `NSPanel`
-5. `GrammarPopupView` displays a word-level diff (via `DiffCalculator`, LCS-based) with red=removed, green=added
-6. Enter accepts → text is pasted back via Accessibility API or clipboard+paste fallback; Escape cancels
+1. User selects text, presses one of the global hotkeys
+2. `HotkeyManager` dispatches by `EventHotKeyID.id` and calls `AppDelegate.triggerGrammarCheck(mode:)`
+3. `AppDelegate` captures text via `AccessibilityManager` (native apps) or clipboard fallback (browsers/Electron, auto-detected)
+4. `LLMServiceFactory.create()` instantiates the configured provider
+5. `processText(text:mode:)` resolves the system prompt via `PromptBuilder.systemPrompt(for:customAppendix:)` and calls `llmService.streamCorrection(text:systemPrompt:)`
+6. Streaming response → `StreamingState` → `PopupWindowManager`'s floating `NSPanel`
+7. `GrammarPopupView` shows the popup title from `mode.popupTitle` plus a word-level diff (via `DiffCalculator`, LCS-based)
+8. Enter accepts → text is pasted back via Accessibility API or clipboard+paste fallback; Escape cancels
 
 ### Text Insertion Strategy
 
-`AppDelegate.acceptCorrection()` uses two paths:
-- **Native apps**: Accessibility API (`AXUIElementSetAttributeValue` on saved focused element), falling back to clipboard+paste
-- **Electron/web apps**: Always clipboard+paste (listed in `AccessibilityManager.appsRequiringTypingFallback`)
+`AppDelegate.acceptCorrection()` uses two paths based on `AccessibilityManager.savedAppRequiresTypingFallback`:
+- **Native apps** (TextEdit, Notes, Mail, Pages…): Accessibility API. Before writing, `AccessibilityManager.writeReplacingSelection(_:element:range:)` re-sets the saved `CFRange` on `kAXSelectedTextRangeAttribute` so the replacement works even if focus changes collapsed the selection. Falls back to clipboard+paste if AX reports failure.
+- **Electron + browsers**: always clipboard+paste. Auto-detected:
+  - Electron: presence of `Contents/Frameworks/Electron Framework.framework` in the bundle (`isElectronApp`)
+  - Browser: app's `Info.plist` declares `http`/`https` in `CFBundleURLTypes` (`isBrowser`)
+- `KeyboardSimulator.simulateCopy()` and `simulatePaste()` poll `CGEventSource.flagsState` until Cmd/Option/Shift/Control are released, then settle 60ms, before posting — avoids leaking hotkey modifiers into the synthesized event.
+- Clipboard read polls `NSPasteboard.changeCount` (no fixed delay).
 
 The previous frontmost app is saved at hotkey press time (`previousApp`) and re-activated before pasting back.
 
@@ -72,3 +86,53 @@ Test target: `FixieTests/` with 5 test files covering `DiffCalculator`, `Grammar
 - Sandbox disabled (required for global hotkey and Accessibility API)
 - `LSUIElement: true` in Info.plist (menu bar only, no dock icon)
 - Global hotkey registered via Carbon HIToolbox (`HotkeyManager`)
+
+## Releasing
+
+### Version source of truth
+
+`GENERATE_INFOPLIST_FILE = YES` is set in `Fixie.xcodeproj/project.pbxproj`, which means **Xcode overrides any version values in `Fixie/Info.plist` at build time**. The source of truth for the app version is in `project.pbxproj` build settings:
+
+- `MARKETING_VERSION` (→ `CFBundleShortVersionString`, e.g. `1.3.0`) — user-facing version shown in About + read by `UpdateChecker.currentVersion`
+- `CURRENT_PROJECT_VERSION` (→ `CFBundleVersion`, e.g. `3`) — strictly increasing build number
+
+Both values live in two places inside `project.pbxproj`: the Debug and Release configurations of the `Fixie` target (search for `MARKETING_VERSION`). The `FixieTests` target has its own values — don't touch those.
+
+After bumping, verify with:
+```bash
+DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer xcodebuild -project Fixie.xcodeproj -scheme Fixie -configuration Debug clean build
+/usr/libexec/PlistBuddy -c "Print :CFBundleShortVersionString" ~/Library/Developer/Xcode/DerivedData/Fixie-*/Build/Products/Debug/Fixie.app/Contents/Info.plist
+```
+
+### Build, sign, and package the DMG
+
+There is no Apple Developer Program account — the app is **ad-hoc signed**. Users get a Gatekeeper warning on first launch (right-click → Open).
+
+```bash
+# 1. Clean Release build
+DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer xcodebuild \
+  -project Fixie.xcodeproj -scheme Fixie -configuration Release clean build
+
+# 2. Stage and ad-hoc sign
+STAGING=/tmp/fixie-release && rm -rf "$STAGING" && mkdir -p "$STAGING"
+cp -R ~/Library/Developer/Xcode/DerivedData/Fixie-*/Build/Products/Release/Fixie.app "$STAGING/Fixie.app"
+codesign --force --deep --sign - "$STAGING/Fixie.app"
+
+# 3. Add Applications symlink and create DMG
+(cd "$STAGING" && ln -s /Applications Applications)
+hdiutil create -volname "Fixie" -srcfolder "$STAGING" -ov -format UDZO "$STAGING/Fixie.dmg"
+```
+
+### Publish to GitHub Releases
+
+```bash
+gh release create vX.Y.Z /tmp/fixie-release/Fixie.dmg \
+  --title "Fixie vX.Y.Z" \
+  --notes "$(cat <<'EOF'
+## Changes
+- ...
+EOF
+)"
+```
+
+The auto-update check in `UpdateChecker` reads `tag_name` from the latest release. Tags are stripped of a leading `v` or `V` before semver comparison. Use lowercase `v` for new tags (`v1.3.1`).

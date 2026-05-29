@@ -10,32 +10,15 @@ final class AccessibilityManager {
     private var savedSelectedRange: CFRange?
     private var enabledAccessibilityPIDs: Set<pid_t> = []
     private var electronDetectionCache: [String: Bool] = [:]
-
-    /// Browsers render web content where AX writes are unreliable, but their
-    /// bundles don't contain "Electron Framework.framework" — so they need an
-    /// explicit list. Electron apps (Slack, Notion, Claude desktop, VSCode…)
-    /// are detected automatically via `isElectronApp(_:)`.
-    private static let browserBundleIDs: Set<String> = [
-        "com.google.Chrome",
-        "com.google.Chrome.canary",
-        "org.chromium.Chromium",
-        "com.brave.Browser",
-        "com.microsoft.edgemac",
-        "com.operasoftware.Opera",
-        "com.vivaldi.Vivaldi",
-        "org.mozilla.firefox",
-        "org.mozilla.firefoxdeveloperedition",
-        "company.thebrowser.Browser",  // Arc
-        "com.apple.Safari",
-    ]
+    private var browserDetectionCache: [String: Bool] = [:]
 
     private init() {}
 
     // MARK: - App Classification
 
     /// Returns true if the app bundle contains "Electron Framework.framework".
-    /// Result is cached per bundle ID since the framework presence doesn't
-    /// change for a given installed app.
+    /// Covers Slack, WhatsApp (older versions), Notion, Linear, Discord, VSCode,
+    /// Claude desktop, Spotify, Figma, Teams, etc. Result is cached per bundle ID.
     private func isElectronApp(_ app: NSRunningApplication) -> Bool {
         guard let bundleID = app.bundleIdentifier else { return false }
         if let cached = electronDetectionCache[bundleID] {
@@ -53,14 +36,34 @@ final class AccessibilityManager {
         return isElectron
     }
 
-    /// An app requires clipboard+paste fallback if it's an Electron app or a
-    /// known browser — both render content where AX writes silently fail.
-    private func appRequiresFallback(_ app: NSRunningApplication) -> Bool {
-        if let bundleID = app.bundleIdentifier,
-           Self.browserBundleIDs.contains(bundleID) {
-            return true
+    /// Returns true if the app declares itself as an http/https URL handler in
+    /// its Info.plist — any real browser does this so it can be set as the
+    /// system default. Covers Safari, Chrome, Firefox, Brave, Edge, Arc, Dia,
+    /// Vivaldi, Opera, and any future browser without needing a hardcoded list.
+    private func isBrowser(_ app: NSRunningApplication) -> Bool {
+        guard let bundleID = app.bundleIdentifier else { return false }
+        if let cached = browserDetectionCache[bundleID] {
+            return cached
         }
-        return isElectronApp(app)
+        guard let bundleURL = app.bundleURL,
+              let bundle = Bundle(url: bundleURL),
+              let urlTypes = bundle.infoDictionary?["CFBundleURLTypes"] as? [[String: Any]] else {
+            browserDetectionCache[bundleID] = false
+            return false
+        }
+        let handlesHTTP = urlTypes.contains { entry in
+            guard let schemes = entry["CFBundleURLSchemes"] as? [String] else { return false }
+            let lowered = schemes.map { $0.lowercased() }
+            return lowered.contains("http") || lowered.contains("https")
+        }
+        browserDetectionCache[bundleID] = handlesHTTP
+        return handlesHTTP
+    }
+
+    /// An app requires clipboard+paste fallback if it's an Electron app or a
+    /// browser — both render content where AX writes silently fail.
+    private func appRequiresFallback(_ app: NSRunningApplication) -> Bool {
+        return isElectronApp(app) || isBrowser(app)
     }
 
     // MARK: - Permission Management

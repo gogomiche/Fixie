@@ -363,7 +363,7 @@ struct SettingsView: View {
                 .font(.title)
                 .fontWeight(.bold)
 
-            Text("Version 1.3.0")
+            Text("Version \(updateChecker.currentVersion)")
                 .foregroundColor(.secondary)
 
             Text("A lightweight grammar correction tool")
