@@ -41,11 +41,11 @@ final class OpenAIService: BaseLLMService {
         model.hasPrefix("gpt-5")
     }
 
-    override func buildRequestBody(text: String, stream: Bool) -> [String: Any] {
+    override func buildRequestBody(text: String, stream: Bool, systemPrompt: String) -> [String: Any] {
         var body: [String: Any] = [
             "model": model,
             "messages": [
-                ["role": "system", "content": PromptBuilder.systemPrompt],
+                ["role": "system", "content": systemPrompt],
                 ["role": "user", "content": PromptBuilder.userMessage(for: text)]
             ]
         ]

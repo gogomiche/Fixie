@@ -36,6 +36,7 @@ class PopupWindowManager {
         originalText: String,
         streamingState: StreamingState,
         providerName: String,
+        mode: GrammarMode,
         onAccept: @escaping () -> Void,
         onReject: @escaping () -> Void
     ) {
@@ -56,6 +57,7 @@ class PopupWindowManager {
             streamingState: streamingState,
             providerName: providerName,
             sourceAppIcon: sourceAppIcon,
+            mode: mode,
             onAccept: { [weak self] in
                 self?.onAccept?()
             },

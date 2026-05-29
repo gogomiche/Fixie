@@ -19,7 +19,7 @@ class BaseLLMService: LLMService {
         fatalError("Subclasses must override configureRequest")
     }
 
-    func buildRequestBody(text: String, stream: Bool) -> [String: Any] {
+    func buildRequestBody(text: String, stream: Bool, systemPrompt: String) -> [String: Any] {
         fatalError("Subclasses must override buildRequestBody")
     }
 
@@ -33,7 +33,7 @@ class BaseLLMService: LLMService {
 
     // MARK: - Common implementation
 
-    func correctGrammar(text: String) async throws -> String {
+    func correctText(text: String, systemPrompt: String) async throws -> String {
         try validateConfiguration()
 
         let sanitizedText = text.sanitizedForLLM()
@@ -48,7 +48,7 @@ class BaseLLMService: LLMService {
         request.addValue("application/json", forHTTPHeaderField: "Content-Type")
 
         configureRequest(&request, forText: sanitizedText)
-        request.httpBody = try JSONSerialization.data(withJSONObject: buildRequestBody(text: sanitizedText, stream: false))
+        request.httpBody = try JSONSerialization.data(withJSONObject: buildRequestBody(text: sanitizedText, stream: false, systemPrompt: systemPrompt))
 
         let (data, response) = try await URLSession.shared.data(for: request)
 
@@ -57,7 +57,7 @@ class BaseLLMService: LLMService {
         return try parseResponse(data: data)
     }
 
-    func correctGrammarStreaming(text: String) -> AsyncThrowingStream<String, Error> {
+    func streamCorrection(text: String, systemPrompt: String) -> AsyncThrowingStream<String, Error> {
         AsyncThrowingStream { continuation in
             Task {
                 do {
@@ -76,7 +76,7 @@ class BaseLLMService: LLMService {
                     request.addValue("application/json", forHTTPHeaderField: "Content-Type")
 
                     configureRequest(&request, forText: sanitizedText)
-                    request.httpBody = try JSONSerialization.data(withJSONObject: buildRequestBody(text: sanitizedText, stream: true))
+                    request.httpBody = try JSONSerialization.data(withJSONObject: buildRequestBody(text: sanitizedText, stream: true, systemPrompt: systemPrompt))
 
                     let (bytes, response) = try await URLSession.shared.bytes(for: request)
 

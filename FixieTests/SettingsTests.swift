@@ -130,6 +130,54 @@ final class SettingsTests: XCTestCase {
         }
     }
 
+    // MARK: - GrammarMode Tests
+
+    func testGrammarMode_defaultHotkey_grammar() {
+        let hotkey = GrammarMode.grammar.defaultHotkey
+        XCTAssertEqual(hotkey.keyCode, 3) // F
+        XCTAssertEqual(hotkey.modifiers, 0x100 | 0x800) // Cmd + Option
+        XCTAssertEqual(hotkey.displayString, "⌘⌥F")
+    }
+
+    func testGrammarMode_defaultHotkey_improve() {
+        let hotkey = GrammarMode.improve.defaultHotkey
+        XCTAssertEqual(hotkey.keyCode, 5) // G
+        XCTAssertEqual(hotkey.modifiers, 0x100 | 0x800) // Cmd + Option
+        XCTAssertEqual(hotkey.displayString, "⌘⌥G")
+    }
+
+    func testGrammarMode_displayName() {
+        XCTAssertEqual(GrammarMode.grammar.displayName, "Grammar Correction")
+        XCTAssertEqual(GrammarMode.improve.displayName, "Improve Phrasing")
+    }
+
+    func testGrammarMode_baseSystemPrompt_differsByMode() {
+        XCTAssertNotEqual(GrammarMode.grammar.baseSystemPrompt, GrammarMode.improve.baseSystemPrompt)
+        XCTAssertFalse(GrammarMode.grammar.baseSystemPrompt.isEmpty)
+        XCTAssertFalse(GrammarMode.improve.baseSystemPrompt.isEmpty)
+    }
+
+    // MARK: - PromptBuilder Tests
+
+    func testPromptBuilder_noAppendix_returnsBaseOnly() {
+        let prompt = PromptBuilder.systemPrompt(for: .grammar, customAppendix: nil)
+        XCTAssertEqual(prompt, GrammarMode.grammar.baseSystemPrompt)
+    }
+
+    func testPromptBuilder_emptyAppendix_returnsBaseOnly() {
+        let prompt = PromptBuilder.systemPrompt(for: .grammar, customAppendix: "   \n   ")
+        XCTAssertEqual(prompt, GrammarMode.grammar.baseSystemPrompt)
+    }
+
+    func testPromptBuilder_withAppendix_appendsInstructions() {
+        let appendix = "Use a formal tone."
+        let prompt = PromptBuilder.systemPrompt(for: .improve, customAppendix: appendix)
+
+        XCTAssertTrue(prompt.contains(GrammarMode.improve.baseSystemPrompt))
+        XCTAssertTrue(prompt.contains("Additional instructions from the user:"))
+        XCTAssertTrue(prompt.contains(appendix))
+    }
+
     // MARK: - LLMProvider Tests
 
     func testLLMProvider_requiresAPIKey() {

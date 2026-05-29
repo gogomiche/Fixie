@@ -8,7 +8,7 @@ class StreamingState: ObservableObject {
     @Published var isComplete: Bool = false
 }
 
-class AppDelegate: NSObject, NSApplicationDelegate {
+class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCenterDelegate {
     var settingsManager = SettingsManager()
     var hotkeyManager: HotkeyManager!
     var settingsWindow: NSWindow?
@@ -29,17 +29,73 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     private let popupManager = PopupWindowManager.shared
 
     func applicationDidFinishLaunching(_ notification: Notification) {
-        setupHotkey()
+        setupHotkeys()
         accessibilityManager.requestAccessibilityPermissions()
         requestNotificationPermissions()
+        setupUpdateChecker()
     }
 
-    private func setupHotkey() {
-        hotkeyManager = HotkeyManager(settingsManager: settingsManager)
-        hotkeyManager.onHotkeyPressed = { [weak self] in
-            self?.triggerGrammarCheck()
+    private func setupUpdateChecker() {
+        UNUserNotificationCenter.current().delegate = self
+        UpdateChecker.shared.registerNotificationCategory()
+
+        guard settingsManager.checkForUpdatesOnLaunch else { return }
+
+        // Delay so we don't compete with the Accessibility prompt at first launch.
+        Task { @MainActor in
+            try? await Task.sleep(nanoseconds: 5_000_000_000)
+            await UpdateChecker.shared.checkInBackgroundIfDue()
         }
-        hotkeyManager.register()
+    }
+
+    @objc func checkForUpdates() {
+        Task { @MainActor in
+            await UpdateChecker.shared.check(silent: false)
+            // If the manual check found nothing new, the user should still see
+            // feedback. Surface it via an alert when there's no popup context.
+            switch UpdateChecker.shared.status {
+            case .upToDate(let v):
+                showUpToDateAlert(version: v)
+            case .available(_, let url):
+                NSWorkspace.shared.open(url)
+            case .failed(let msg):
+                showErrorAlert("Update check failed: \(msg)")
+            case .idle, .checking:
+                break
+            }
+        }
+    }
+
+    // MARK: - UNUserNotificationCenterDelegate
+
+    func userNotificationCenter(_ center: UNUserNotificationCenter,
+                                willPresent notification: UNNotification,
+                                withCompletionHandler completionHandler: @escaping (UNNotificationPresentationOptions) -> Void) {
+        completionHandler([.banner, .sound])
+    }
+
+    func userNotificationCenter(_ center: UNUserNotificationCenter,
+                                didReceive response: UNNotificationResponse,
+                                withCompletionHandler completionHandler: @escaping () -> Void) {
+        _ = UpdateChecker.shared.handle(response: response)
+        completionHandler()
+    }
+
+    private func setupHotkeys() {
+        hotkeyManager = HotkeyManager(settingsManager: settingsManager)
+        hotkeyManager.onModeHotkey = { [weak self] mode in
+            self?.triggerGrammarCheck(mode: mode)
+        }
+        hotkeyManager.registerAll()
+
+        // Re-register hotkeys when the user changes them in Settings.
+        NotificationCenter.default.addObserver(
+            forName: .hotkeyChanged,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            self?.hotkeyManager.registerAll()
+        }
     }
 
     private func requestNotificationPermissions() {
@@ -53,6 +109,14 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     // MARK: - Grammar Check Flow
 
     @objc func triggerGrammarCheck() {
+        triggerGrammarCheck(mode: .grammar)
+    }
+
+    @objc func triggerImproveCheck() {
+        triggerGrammarCheck(mode: .improve)
+    }
+
+    func triggerGrammarCheck(mode: GrammarMode) {
         guard !isProcessing else { return }
 
         if !accessibilityManager.isAccessibilityTrusted {
@@ -62,7 +126,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
         // Save the frontmost app BEFORE showing popup - this is critical for pasting back
         previousApp = NSWorkspace.shared.frontmostApplication
-        print("[Fixie] Saved previous app: \(previousApp?.localizedName ?? "nil")")
+        print("[Fixie] Saved previous app: \(previousApp?.localizedName ?? "nil") (mode: \(mode.rawValue))")
 
         // For Electron/web apps, skip Accessibility API (can return garbled/lowercase text)
         let useClipboardOnly = accessibilityManager.frontmostAppRequiresFallback
@@ -75,7 +139,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                 print("[Fixie] Accessibility API succeeded: \(selectedText.prefix(50))...")
                 usedAccessibilityForRead = true
                 currentOriginalText = selectedText
-                checkGrammar(text: selectedText)
+                processText(text: selectedText, mode: mode)
                 return
             }
             print("[Fixie] Accessibility API failed, falling back to clipboard simulation")
@@ -85,12 +149,22 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         usedAccessibilityForRead = false
         clipboardManager.saveCurrentContent()
         clipboardManager.clear()
+
+        // Record changeCount AFTER clearing so we can detect when Cmd+C
+        // populates the pasteboard (more reliable than a fixed delay).
+        let preCopyChangeCount = NSPasteboard.general.changeCount
+        let frontmostBeforeCopy = NSWorkspace.shared.frontmostApplication?.localizedName ?? "nil"
+        print("[Fixie] Pre-copy: changeCount=\(preCopyChangeCount), frontmost=\(frontmostBeforeCopy)")
+
         print("[Fixie] Simulating Cmd+C...")
         keyboardSimulator.simulateCopy()
 
-        // Wait for clipboard to be populated
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { [weak self] in
+        // Poll for clipboard change instead of fixed delay
+        waitForClipboardChange(since: preCopyChangeCount, maxAttempts: 30, intervalMs: 30) { [weak self] in
             guard let self = self else { return }
+
+            let post = NSPasteboard.general.changeCount
+            print("[Fixie] Post-copy: changeCount=\(post) (was \(preCopyChangeCount))")
 
             // Prefer HTML→markdown from clipboard (preserves formatting from web/Electron apps)
             let clipboardContent = self.clipboardManager.getContentPreferringMarkdown()
@@ -98,7 +172,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
             if let selectedText = clipboardContent, !selectedText.isEmpty {
                 self.currentOriginalText = selectedText
-                self.checkGrammar(text: selectedText)
+                self.processText(text: selectedText, mode: mode)
             } else {
                 print("[Fixie] No text in clipboard, showing alert")
                 self.clipboardManager.restoreSavedContent()
@@ -107,11 +181,40 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
-    private func checkGrammar(text: String) {
+    /// Poll the pasteboard until its changeCount differs from `since`, then
+    /// invoke `completion`. Gives up after `maxAttempts × intervalMs` and
+    /// still calls `completion` so the caller can show its "no text" alert.
+    private func waitForClipboardChange(since baseline: Int, maxAttempts: Int, intervalMs: Int, completion: @escaping () -> Void) {
+        var attempt = 0
+        func tick() {
+            if NSPasteboard.general.changeCount != baseline {
+                completion()
+                return
+            }
+            attempt += 1
+            if attempt >= maxAttempts {
+                print("[Fixie] Pasteboard never changed after \(attempt) attempts (~\(attempt * intervalMs)ms)")
+                completion()
+                return
+            }
+            DispatchQueue.main.asyncAfter(deadline: .now() + .milliseconds(intervalMs)) {
+                tick()
+            }
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + .milliseconds(intervalMs)) {
+            tick()
+        }
+    }
+
+    private func processText(text: String, mode: GrammarMode) {
         currentTask?.cancel()
         isProcessing = true
 
         let llmService = LLMServiceFactory.create(provider: settingsManager.selectedProvider, settings: settingsManager)
+        let systemPrompt = PromptBuilder.systemPrompt(
+            for: mode,
+            customAppendix: settingsManager.customPrompt(for: mode)
+        )
 
         // Reset streaming state
         streamingState.text = ""
@@ -123,6 +226,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             originalText: text,
             streamingState: streamingState,
             providerName: getProviderDisplayName(),
+            mode: mode,
             onAccept: { [weak self] in self?.acceptCorrection() },
             onReject: { [weak self] in self?.rejectCorrection() }
         )
@@ -139,7 +243,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                 try Task.checkCancellation()
                 var fullText = ""
 
-                for try await chunk in llmService.correctGrammarStreaming(text: text) {
+                for try await chunk in llmService.streamCorrection(text: text, systemPrompt: systemPrompt) {
                     try Task.checkCancellation()
                     fullText += chunk
                     self.streamingState.text = fullText
@@ -167,6 +271,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
         let textToPaste = currentCorrectedText
         let savedElement = accessibilityManager.getSavedElement()
+        let savedRange = accessibilityManager.savedSelectionRange
         let requiresTypingFallback = accessibilityManager.savedAppRequiresTypingFallback
 
         // Use the app saved at the start of triggerGrammarCheck(), not the current frontmost app
@@ -221,14 +326,13 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                 guard let self = self else { return }
 
                 if let element = savedElement {
-                    print("[Fixie] Trying to set text via Accessibility API...")
-                    let result = AXUIElementSetAttributeValue(
-                        element,
-                        kAXSelectedTextAttribute as CFString,
-                        textToPaste as CFTypeRef
+                    print("[Fixie] Trying to set text via Accessibility API (restoring selection)...")
+                    let success = self.accessibilityManager.writeReplacingSelection(
+                        textToPaste,
+                        element: element,
+                        range: savedRange
                     )
-                    print("[Fixie] Accessibility API set result: \(result.rawValue)")
-                    if result == .success {
+                    if success {
                         print("[Fixie] Accessibility API succeeded!")
                         self.clipboardManager.restoreSavedContent()
                         self.popupManager.closeWindowDeferred()
@@ -305,6 +409,16 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         let alert = NSAlert()
         alert.messageText = "No Text Selected"
         alert.informativeText = "Please select some text first, then trigger Fixie."
+        alert.alertStyle = .informational
+        alert.addButton(withTitle: "OK")
+        NSApp.activate(ignoringOtherApps: true)
+        alert.runModal()
+    }
+
+    private func showUpToDateAlert(version: String) {
+        let alert = NSAlert()
+        alert.messageText = "You're up to date"
+        alert.informativeText = "Fixie \(version) is the latest version."
         alert.alertStyle = .informational
         alert.addButton(withTitle: "OK")
         NSApp.activate(ignoringOtherApps: true)

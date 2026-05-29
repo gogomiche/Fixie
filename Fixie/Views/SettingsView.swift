@@ -4,7 +4,8 @@ import ServiceManagement
 enum SettingsTab: String, CaseIterable {
     case general = "General"
     case llm = "LLM Provider"
-    case hotkey = "Hotkey"
+    case hotkey = "Hotkeys"
+    case prompts = "Prompts"
     case about = "About"
 
     var icon: String {
@@ -12,6 +13,7 @@ enum SettingsTab: String, CaseIterable {
         case .general: return "gear"
         case .llm: return "brain"
         case .hotkey: return "keyboard"
+        case .prompts: return "text.bubble"
         case .about: return "info.circle"
         }
     }
@@ -19,8 +21,12 @@ enum SettingsTab: String, CaseIterable {
 
 struct SettingsView: View {
     @EnvironmentObject var settings: SettingsManager
-    @State private var isRecordingHotkey = false
+    @ObservedObject private var updateChecker = UpdateChecker.shared
+    @State private var recordingMode: GrammarMode?
     @State private var selectedTab: SettingsTab = .general
+    @State private var ollamaModels: [String] = []
+    @State private var ollamaModelsLoading = false
+    @State private var ollamaModelsError: String?
 
     var body: some View {
         HStack(spacing: 0) {
@@ -53,6 +59,8 @@ struct SettingsView: View {
                         llmTab
                     case .hotkey:
                         hotkeyTab
+                    case .prompts:
+                        promptsTab
                     case .about:
                         aboutTab
                     }
@@ -86,8 +94,71 @@ struct SettingsView: View {
                     }
                 }
             }
+
+            Section("Updates") {
+                Toggle("Check for updates on launch", isOn: $settings.checkForUpdatesOnLaunch)
+
+                HStack {
+                    Text("Current version:")
+                    Spacer()
+                    Text(updateChecker.currentVersion)
+                        .foregroundColor(.secondary)
+                }
+
+                HStack {
+                    Text("Last checked:")
+                    Spacer()
+                    Text(formattedLastCheck)
+                        .foregroundColor(.secondary)
+                }
+
+                updateStatusRow
+
+                HStack {
+                    Button("Check Now") {
+                        Task { await updateChecker.check(silent: false) }
+                    }
+                    .disabled(updateChecker.status == .checking)
+
+                    if case .available = updateChecker.status {
+                        Button("Download…") {
+                            updateChecker.openLatestReleaseURL()
+                        }
+                    }
+                }
+            }
         }
         .formStyle(.grouped)
+    }
+
+    private var formattedLastCheck: String {
+        guard let date = updateChecker.lastCheckDate else { return "Never" }
+        let formatter = RelativeDateTimeFormatter()
+        formatter.unitsStyle = .full
+        return formatter.localizedString(for: date, relativeTo: Date())
+    }
+
+    @ViewBuilder
+    private var updateStatusRow: some View {
+        switch updateChecker.status {
+        case .idle:
+            EmptyView()
+        case .checking:
+            HStack {
+                ProgressView().controlSize(.small)
+                Text("Checking…").foregroundColor(.secondary)
+            }
+        case .upToDate(let version):
+            Label("Up to date (\(version))", systemImage: "checkmark.circle.fill")
+                .foregroundColor(.green)
+        case .available(let version, _):
+            Label("Version \(version) is available", systemImage: "arrow.down.circle.fill")
+                .foregroundColor(.accentColor)
+        case .failed(let message):
+            Label(message, systemImage: "exclamationmark.triangle.fill")
+                .foregroundColor(.orange)
+                .lineLimit(2)
+        }
     }
 
     private var llmTab: some View {
@@ -134,11 +205,42 @@ struct SettingsView: View {
                 case .ollama:
                     TextField("Ollama Endpoint", text: $settings.ollamaEndpoint)
                         .textFieldStyle(.roundedBorder)
-                    TextField("Model Name", text: $settings.ollamaModel)
-                        .textFieldStyle(.roundedBorder)
-                    Text("Make sure Ollama is running locally")
-                        .font(.caption)
-                        .foregroundColor(.secondary)
+
+                    if !ollamaModels.isEmpty {
+                        Picker("Model", selection: $settings.ollamaModel) {
+                            ForEach(ollamaModels, id: \.self) { model in
+                                Text(model).tag(model)
+                            }
+                            if !ollamaModels.contains(settings.ollamaModel) && !settings.ollamaModel.isEmpty {
+                                Text("\(settings.ollamaModel) (not installed)").tag(settings.ollamaModel)
+                            }
+                        }
+                    } else {
+                        TextField("Model Name", text: $settings.ollamaModel)
+                            .textFieldStyle(.roundedBorder)
+                    }
+
+                    HStack {
+                        Button(ollamaModelsLoading ? "Loading…" : "Refresh models") {
+                            Task { await loadOllamaModels() }
+                        }
+                        .disabled(ollamaModelsLoading)
+
+                        if let error = ollamaModelsError {
+                            Text(error)
+                                .font(.caption)
+                                .foregroundColor(.orange)
+                                .lineLimit(1)
+                        } else if ollamaModels.isEmpty {
+                            Text("Make sure Ollama is running locally")
+                                .font(.caption)
+                                .foregroundColor(.secondary)
+                        } else {
+                            Text("\(ollamaModels.count) model\(ollamaModels.count == 1 ? "" : "s") installed")
+                                .font(.caption)
+                                .foregroundColor(.secondary)
+                        }
+                    }
                 }
             }
         }
@@ -147,41 +249,108 @@ struct SettingsView: View {
 
     private var hotkeyTab: some View {
         Form {
-            Section("Global Hotkey") {
-                HStack {
-                    Text("Current hotkey:")
-                    Spacer()
-                    Text(settings.hotkey.displayString)
-                        .font(.system(.body, design: .monospaced))
-                        .padding(.horizontal, 12)
-                        .padding(.vertical, 6)
-                        .background(Color(NSColor.controlBackgroundColor))
-                        .cornerRadius(6)
+            ForEach(GrammarMode.allCases, id: \.self) { mode in
+                Section(mode.displayName) {
+                    hotkeyRow(for: mode)
                 }
-
-                Button(isRecordingHotkey ? "Press new hotkey..." : "Change Hotkey") {
-                    isRecordingHotkey.toggle()
-                }
-                .disabled(isRecordingHotkey)
-
-                if isRecordingHotkey {
-                    HotkeyRecorderView { keyCode, modifiers in
-                        settings.hotkey = HotkeyConfig(keyCode: keyCode, modifiers: modifiers)
-                        isRecordingHotkey = false
-                        // Re-register the hotkey
-                        NotificationCenter.default.post(name: .hotkeyChanged, object: nil)
-                    }
-                    .frame(height: 40)
-                }
-
-                Button("Reset to Default (⌥⌘G)") {
-                    settings.hotkey = HotkeyConfig.defaultHotkey
-                    NotificationCenter.default.post(name: .hotkeyChanged, object: nil)
-                }
-                .foregroundColor(.secondary)
             }
         }
         .formStyle(.grouped)
+    }
+
+    @ViewBuilder
+    private func hotkeyRow(for mode: GrammarMode) -> some View {
+        let current = settings.hotkey(for: mode)
+        let isRecording = recordingMode == mode
+
+        HStack {
+            Text("Current hotkey:")
+            Spacer()
+            Text(current.displayString)
+                .font(.system(.body, design: .monospaced))
+                .padding(.horizontal, 12)
+                .padding(.vertical, 6)
+                .background(Color(NSColor.controlBackgroundColor))
+                .cornerRadius(6)
+        }
+
+        Button(isRecording ? "Press new hotkey…" : "Change Hotkey") {
+            recordingMode = isRecording ? nil : mode
+        }
+        .disabled(recordingMode != nil && !isRecording)
+
+        if isRecording {
+            HotkeyRecorderView { keyCode, modifiers in
+                settings.setHotkey(HotkeyConfig(keyCode: keyCode, modifiers: modifiers), for: mode)
+                recordingMode = nil
+                NotificationCenter.default.post(name: .hotkeyChanged, object: nil)
+            }
+            .frame(height: 40)
+        }
+
+        Button("Reset to Default (\(mode.defaultHotkey.displayString))") {
+            settings.setHotkey(mode.defaultHotkey, for: mode)
+            NotificationCenter.default.post(name: .hotkeyChanged, object: nil)
+        }
+        .foregroundColor(.secondary)
+    }
+
+    private var promptsTab: some View {
+        Form {
+            Section {
+                Text("Add your own instructions to the built-in prompt for each mode. Your text is appended to the system prompt — it doesn't replace it.")
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+            }
+
+            ForEach(GrammarMode.allCases, id: \.self) { mode in
+                Section(mode.displayName) {
+                    promptEditor(for: mode)
+                }
+            }
+        }
+        .formStyle(.grouped)
+    }
+
+    @ViewBuilder
+    private func promptEditor(for mode: GrammarMode) -> some View {
+        let binding = Binding<String>(
+            get: { settings.customPrompt(for: mode) },
+            set: { settings.setCustomPrompt($0, for: mode) }
+        )
+
+        TextEditor(text: binding)
+            .font(.system(size: 13))
+            .frame(minHeight: 80)
+            .padding(6)
+            .background(Color(NSColor.textBackgroundColor))
+            .cornerRadius(6)
+            .overlay(
+                RoundedRectangle(cornerRadius: 6)
+                    .stroke(Color.secondary.opacity(0.3), lineWidth: 1)
+            )
+
+        HStack {
+            Text(promptPlaceholder(for: mode))
+                .font(.caption)
+                .foregroundColor(.secondary)
+
+            Spacer()
+
+            Button("Reset") {
+                settings.setCustomPrompt("", for: mode)
+            }
+            .disabled(settings.customPrompt(for: mode).isEmpty)
+        }
+    }
+
+    private func promptPlaceholder(for mode: GrammarMode) -> String {
+        switch mode {
+        case .grammar:
+            return "e.g. \"Prefer British spellings\" or \"Match the surrounding tone\""
+        case .improve:
+            return "e.g. \"Use a formal register\" or \"Keep sentences short\""
+        }
     }
 
     private var aboutTab: some View {
@@ -194,7 +363,7 @@ struct SettingsView: View {
                 .font(.title)
                 .fontWeight(.bold)
 
-            Text("Version 1.0.0")
+            Text("Version 1.3.0")
                 .foregroundColor(.secondary)
 
             Text("A lightweight grammar correction tool")
@@ -224,6 +393,18 @@ struct SettingsView: View {
             }
         }
         .padding()
+    }
+
+    private func loadOllamaModels() async {
+        ollamaModelsLoading = true
+        ollamaModelsError = nil
+        defer { ollamaModelsLoading = false }
+        do {
+            ollamaModels = try await OllamaService.fetchAvailableModels(endpoint: settings.ollamaEndpoint)
+        } catch {
+            ollamaModels = []
+            ollamaModelsError = error.localizedDescription
+        }
     }
 
     private func setLaunchAtLogin(enabled: Bool) {

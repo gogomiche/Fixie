@@ -124,7 +124,16 @@ class SettingsManager: ObservableObject {
     @Published var ollamaModel: String {
         didSet { saveNonSecure() }
     }
-    @Published var hotkey: HotkeyConfig {
+    @Published var hotkeyGrammar: HotkeyConfig {
+        didSet { saveNonSecure() }
+    }
+    @Published var hotkeyImprove: HotkeyConfig {
+        didSet { saveNonSecure() }
+    }
+    @Published var customPromptGrammar: String {
+        didSet { saveNonSecure() }
+    }
+    @Published var customPromptImprove: String {
         didSet { saveNonSecure() }
     }
     @Published var openAIModel: String {
@@ -140,6 +149,9 @@ class SettingsManager: ObservableObject {
         didSet { saveNonSecure() }
     }
     @Published var maxRetries: Int {
+        didSet { saveNonSecure() }
+    }
+    @Published var checkForUpdatesOnLaunch: Bool {
         didSet { saveNonSecure() }
     }
 
@@ -170,10 +182,15 @@ class SettingsManager: ObservableObject {
         static let ollamaModel = "ollamaModel"
         static let openAIModel = "openAIModel"
         static let claudeModel = "claudeModel"
-        static let hotkey = "hotkey"
+        static let hotkey = "hotkey"  // legacy, migrated to hotkeyGrammar
+        static let hotkeyGrammar = "hotkeyGrammar"
+        static let hotkeyImprove = "hotkeyImprove"
+        static let customPromptGrammar = "customPromptGrammar"
+        static let customPromptImprove = "customPromptImprove"
         static let launchAtLogin = "launchAtLogin"
         static let requestTimeout = "requestTimeout"
         static let maxRetries = "maxRetries"
+        static let checkForUpdatesOnLaunch = "checkForUpdatesOnLaunch"
     }
 
     init() {
@@ -191,13 +208,25 @@ class SettingsManager: ObservableObject {
         self.claudeModel = defaults.string(forKey: DefaultsKeys.claudeModel) ?? "claude-sonnet-4-20250514"
         self.launchAtLogin = defaults.bool(forKey: DefaultsKeys.launchAtLogin)
 
-        // Load hotkey before other properties that depend on self
-        if let hotkeyData = defaults.data(forKey: DefaultsKeys.hotkey),
-           let hotkey = try? JSONDecoder().decode(HotkeyConfig.self, from: hotkeyData) {
-            self.hotkey = hotkey
-        } else {
-            self.hotkey = HotkeyConfig.defaultHotkey
-        }
+        // Load per-mode hotkeys, with migration from the legacy single `hotkey` field.
+        self.hotkeyGrammar = Self.loadHotkey(
+            from: defaults,
+            key: DefaultsKeys.hotkeyGrammar,
+            legacyKey: DefaultsKeys.hotkey,
+            legacyDefault: HotkeyConfig(keyCode: 5, modifiers: 0x100 | 0x800),  // old ⌥⌘G
+            newDefault: GrammarMode.grammar.defaultHotkey                       // new ⌥⌘F
+        )
+        self.hotkeyImprove = Self.loadHotkey(
+            from: defaults,
+            key: DefaultsKeys.hotkeyImprove,
+            legacyKey: nil,
+            legacyDefault: nil,
+            newDefault: GrammarMode.improve.defaultHotkey                       // ⌥⌘G
+        )
+
+        // Custom per-mode prompts (default empty)
+        self.customPromptGrammar = defaults.string(forKey: DefaultsKeys.customPromptGrammar) ?? ""
+        self.customPromptImprove = defaults.string(forKey: DefaultsKeys.customPromptImprove) ?? ""
 
         // Load timeout and retries with defaults
         let savedTimeout = defaults.double(forKey: DefaultsKeys.requestTimeout)
@@ -206,8 +235,85 @@ class SettingsManager: ObservableObject {
         let savedRetries = defaults.integer(forKey: DefaultsKeys.maxRetries)
         self.maxRetries = savedRetries > 0 ? savedRetries : ServiceConfiguration.defaultMaxRetries
 
+        // Default to checking for updates on launch (opt-out, not opt-in)
+        if defaults.object(forKey: DefaultsKeys.checkForUpdatesOnLaunch) == nil {
+            self.checkForUpdatesOnLaunch = true
+        } else {
+            self.checkForUpdatesOnLaunch = defaults.bool(forKey: DefaultsKeys.checkForUpdatesOnLaunch)
+        }
+
         // Migrate API keys from UserDefaults to Keychain (one-time migration)
         migrateAPIKeysToKeychain()
+
+        // Safety: if grammar and improve hotkeys collide (e.g. from a
+        // migration edge case), reset improve to its default.
+        if self.hotkeyGrammar == self.hotkeyImprove {
+            self.hotkeyImprove = GrammarMode.improve.defaultHotkey
+        }
+
+        // Clear the legacy `hotkey` field now that migration is complete.
+        if defaults.object(forKey: DefaultsKeys.hotkey) != nil {
+            defaults.removeObject(forKey: DefaultsKeys.hotkey)
+        }
+    }
+
+    /// Load a hotkey from UserDefaults, falling back to:
+    /// 1. The legacy single-hotkey field if `legacyKey` is provided. If the
+    ///    legacy value matches `legacyDefault`, it was the old default ⌥⌘G —
+    ///    so we ignore it and use `newDefault` (which is ⌥⌘F now). If the
+    ///    legacy value is something else, the user had customized it, so we
+    ///    preserve their customization by binding it to the grammar mode.
+    /// 2. `newDefault` if nothing was stored.
+    private static func loadHotkey(
+        from defaults: UserDefaults,
+        key: String,
+        legacyKey: String?,
+        legacyDefault: HotkeyConfig?,
+        newDefault: HotkeyConfig
+    ) -> HotkeyConfig {
+        if let data = defaults.data(forKey: key),
+           let hotkey = try? JSONDecoder().decode(HotkeyConfig.self, from: data) {
+            return hotkey
+        }
+        if let legacyKey = legacyKey,
+           let data = defaults.data(forKey: legacyKey),
+           let legacy = try? JSONDecoder().decode(HotkeyConfig.self, from: data) {
+            if let legacyDefault = legacyDefault, legacy == legacyDefault {
+                return newDefault
+            }
+            return legacy
+        }
+        return newDefault
+    }
+
+    // MARK: - Per-mode accessors
+
+    func hotkey(for mode: GrammarMode) -> HotkeyConfig {
+        switch mode {
+        case .grammar: return hotkeyGrammar
+        case .improve: return hotkeyImprove
+        }
+    }
+
+    func customPrompt(for mode: GrammarMode) -> String {
+        switch mode {
+        case .grammar: return customPromptGrammar
+        case .improve: return customPromptImprove
+        }
+    }
+
+    func setHotkey(_ hotkey: HotkeyConfig, for mode: GrammarMode) {
+        switch mode {
+        case .grammar: hotkeyGrammar = hotkey
+        case .improve: hotkeyImprove = hotkey
+        }
+    }
+
+    func setCustomPrompt(_ value: String, for mode: GrammarMode) {
+        switch mode {
+        case .grammar: customPromptGrammar = value
+        case .improve: customPromptImprove = value
+        }
     }
 
     private func saveNonSecure() {
@@ -219,9 +325,15 @@ class SettingsManager: ObservableObject {
         defaults.set(launchAtLogin, forKey: DefaultsKeys.launchAtLogin)
         defaults.set(requestTimeout, forKey: DefaultsKeys.requestTimeout)
         defaults.set(maxRetries, forKey: DefaultsKeys.maxRetries)
+        defaults.set(checkForUpdatesOnLaunch, forKey: DefaultsKeys.checkForUpdatesOnLaunch)
+        defaults.set(customPromptGrammar, forKey: DefaultsKeys.customPromptGrammar)
+        defaults.set(customPromptImprove, forKey: DefaultsKeys.customPromptImprove)
 
-        if let hotkeyData = try? JSONEncoder().encode(hotkey) {
-            defaults.set(hotkeyData, forKey: DefaultsKeys.hotkey)
+        if let data = try? JSONEncoder().encode(hotkeyGrammar) {
+            defaults.set(data, forKey: DefaultsKeys.hotkeyGrammar)
+        }
+        if let data = try? JSONEncoder().encode(hotkeyImprove) {
+            defaults.set(data, forKey: DefaultsKeys.hotkeyImprove)
         }
     }
 

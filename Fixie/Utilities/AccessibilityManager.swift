@@ -6,28 +6,16 @@ final class AccessibilityManager {
 
     private var savedFocusedElement: AXUIElement?
     private var savedAppBundleID: String?
+    private var savedAppRequiresFallback: Bool = false
+    private var savedSelectedRange: CFRange?
     private var enabledAccessibilityPIDs: Set<pid_t> = []
+    private var electronDetectionCache: [String: Bool] = [:]
 
-    /// Apps where Accessibility API write doesn't work (Electron/web-based apps)
-    /// These apps report success for kAXSelectedTextAttribute writes but don't actually update
-    private static let appsRequiringTypingFallback: Set<String> = [
-        // Electron apps
-        "net.whatsapp.WhatsApp",
-        "com.tinyspeck.slackmacgap",  // Slack
-        "com.microsoft.teams",
-        "com.microsoft.teams2",
-        "com.hnc.Discord",
-        "com.spotify.client",
-        "com.figma.Desktop",
-        "com.notion.id",
-        "com.slite.desktop",
-        "com.slite.Slite",
-        "com.linear",
-        "com.vscodium",
-        "com.microsoft.VSCode",
-        "com.microsoft.VSCodeInsiders",
-        "com.todesktop.230313mzl4w4u92",  // Linear
-        // Browsers (web content)
+    /// Browsers render web content where AX writes are unreliable, but their
+    /// bundles don't contain "Electron Framework.framework" — so they need an
+    /// explicit list. Electron apps (Slack, Notion, Claude desktop, VSCode…)
+    /// are detected automatically via `isElectronApp(_:)`.
+    private static let browserBundleIDs: Set<String> = [
         "com.google.Chrome",
         "com.google.Chrome.canary",
         "org.chromium.Chromium",
@@ -38,10 +26,42 @@ final class AccessibilityManager {
         "org.mozilla.firefox",
         "org.mozilla.firefoxdeveloperedition",
         "company.thebrowser.Browser",  // Arc
-        "com.apple.Safari",  // Safari web content
+        "com.apple.Safari",
     ]
 
     private init() {}
+
+    // MARK: - App Classification
+
+    /// Returns true if the app bundle contains "Electron Framework.framework".
+    /// Result is cached per bundle ID since the framework presence doesn't
+    /// change for a given installed app.
+    private func isElectronApp(_ app: NSRunningApplication) -> Bool {
+        guard let bundleID = app.bundleIdentifier else { return false }
+        if let cached = electronDetectionCache[bundleID] {
+            return cached
+        }
+        guard let bundleURL = app.bundleURL else {
+            electronDetectionCache[bundleID] = false
+            return false
+        }
+        let frameworkPath = bundleURL
+            .appendingPathComponent("Contents/Frameworks/Electron Framework.framework")
+            .path
+        let isElectron = FileManager.default.fileExists(atPath: frameworkPath)
+        electronDetectionCache[bundleID] = isElectron
+        return isElectron
+    }
+
+    /// An app requires clipboard+paste fallback if it's an Electron app or a
+    /// known browser — both render content where AX writes silently fail.
+    private func appRequiresFallback(_ app: NSRunningApplication) -> Bool {
+        if let bundleID = app.bundleIdentifier,
+           Self.browserBundleIDs.contains(bundleID) {
+            return true
+        }
+        return isElectronApp(app)
+    }
 
     // MARK: - Permission Management
 
@@ -99,6 +119,15 @@ final class AccessibilityManager {
     func clearSavedElement() {
         savedFocusedElement = nil
         savedAppBundleID = nil
+        savedAppRequiresFallback = false
+        savedSelectedRange = nil
+    }
+
+    /// The selection range captured at read time (location + length in chars).
+    /// Used to restore the selection before writing back, since the selection
+    /// can be collapsed by focus changes between read and write.
+    var savedSelectionRange: CFRange? {
+        savedSelectedRange
     }
 
     /// Check if there's a saved element
@@ -111,19 +140,17 @@ final class AccessibilityManager {
         return savedFocusedElement
     }
 
-    /// Check if the saved app requires typing fallback (Electron/web apps)
+    /// Check if the saved app requires typing fallback (Electron/web apps).
+    /// Captured at read time so the decision is stable across the request.
     var savedAppRequiresTypingFallback: Bool {
-        guard let bundleID = savedAppBundleID else { return false }
-        return Self.appsRequiringTypingFallback.contains(bundleID)
+        savedAppRequiresFallback
     }
 
     /// Check if the current frontmost app needs clipboard fallback
     /// (Electron/web apps where Accessibility API returns garbled text)
     var frontmostAppRequiresFallback: Bool {
-        guard let bundleID = NSWorkspace.shared.frontmostApplication?.bundleIdentifier else {
-            return false
-        }
-        return Self.appsRequiringTypingFallback.contains(bundleID)
+        guard let app = NSWorkspace.shared.frontmostApplication else { return false }
+        return appRequiresFallback(app)
     }
 
     // MARK: - Text Operations
@@ -181,10 +208,57 @@ final class AccessibilityManager {
 
         // Save the focused element and app bundle ID for later use when writing back
         savedFocusedElement = axElement
-        savedAppBundleID = NSWorkspace.shared.frontmostApplication?.bundleIdentifier
-        print("[Accessibility] Saved app bundle ID: \(savedAppBundleID ?? "nil")")
+        if let app = NSWorkspace.shared.frontmostApplication {
+            savedAppBundleID = app.bundleIdentifier
+            savedAppRequiresFallback = appRequiresFallback(app)
+        } else {
+            savedAppBundleID = nil
+            savedAppRequiresFallback = false
+        }
+        print("[Accessibility] Saved app bundle ID: \(savedAppBundleID ?? "nil") (requires fallback: \(savedAppRequiresFallback))")
+
+        // Capture the selection range so we can restore it before writing back.
+        // If the user clicks in the popup or focus shifts, the selection may
+        // collapse — AX would then insert at the cursor instead of replacing.
+        var rangeRef: CFTypeRef?
+        if AXUIElementCopyAttributeValue(axElement, kAXSelectedTextRangeAttribute as CFString, &rangeRef) == .success,
+           let value = rangeRef,
+           CFGetTypeID(value) == AXValueGetTypeID() {
+            var range = CFRange()
+            if AXValueGetValue(value as! AXValue, .cfRange, &range) {
+                savedSelectedRange = range
+                print("[Accessibility] Saved selection range: location=\(range.location), length=\(range.length)")
+            }
+        } else {
+            savedSelectedRange = nil
+        }
 
         return text
+    }
+
+    /// Write replacement text via AX, restoring the originally-captured
+    /// selection range first. This prevents the "insert at cursor instead of
+    /// replace" failure when the selection has been collapsed between read
+    /// and write (e.g. user clicked in the popup).
+    /// Returns true if AX reports success.
+    func writeReplacingSelection(_ text: String, element: AXUIElement, range: CFRange?) -> Bool {
+        if var mutableRange = range {
+            if let rangeValue = AXValueCreate(.cfRange, &mutableRange) {
+                let restoreResult = AXUIElementSetAttributeValue(
+                    element,
+                    kAXSelectedTextRangeAttribute as CFString,
+                    rangeValue
+                )
+                print("[Accessibility] Restored selection (loc=\(mutableRange.location), len=\(mutableRange.length)): \(restoreResult.rawValue)")
+            }
+        }
+
+        let result = AXUIElementSetAttributeValue(
+            element,
+            kAXSelectedTextAttribute as CFString,
+            text as CFTypeRef
+        )
+        return result == .success
     }
 
     /// Set selected text using the saved focused element

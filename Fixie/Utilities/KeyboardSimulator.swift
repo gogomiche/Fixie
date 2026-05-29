@@ -7,14 +7,45 @@ class KeyboardSimulator {
 
     private init() {}
 
-    /// Simulate Cmd+C (copy)
+    /// Simulate Cmd+C (copy). Waits for the user to release any held
+    /// modifier keys first — otherwise the hotkey modifiers (e.g. ⌥⌘ from
+    /// the global hotkey that triggered Fixie) leak into the synthesized
+    /// Cmd+C and the app interprets it as ⌥⌘C, which is a different
+    /// shortcut → nothing gets copied.
     func simulateCopy() {
+        waitForModifiersToClear()
         simulateKeyPress(keyCode: CGKeyCode(kVK_ANSI_C), withCommand: true)
     }
 
-    /// Simulate Cmd+V (paste)
+    /// Simulate Cmd+V (paste). Same modifier-release wait as Cmd+C.
     func simulatePaste() {
+        waitForModifiersToClear()
         simulateKeyPress(keyCode: CGKeyCode(kVK_ANSI_V), withCommand: true)
+    }
+
+    /// Block (synchronously) until none of Cmd/Option/Shift/Control are
+    /// physically held, or `timeoutMs` elapses. Polls every 10 ms.
+    /// After detecting release, sleeps an additional `settleMs` to let the
+    /// system event queue fully drain modifier-up events — otherwise a
+    /// subsequent synthesized key event can still be merged with a residual
+    /// modifier state by the receiving app.
+    private func waitForModifiersToClear(timeoutMs: Int = 1000, settleMs: Int = 60) {
+        let modifierMask: CGEventFlags = [.maskCommand, .maskAlternate, .maskShift, .maskControl]
+        let start = Date()
+        let timeout = Double(timeoutMs) / 1000.0
+
+        while Date().timeIntervalSince(start) < timeout {
+            let flags = CGEventSource.flagsState(.combinedSessionState)
+            if flags.intersection(modifierMask).isEmpty {
+                let elapsed = Int(Date().timeIntervalSince(start) * 1000)
+                Thread.sleep(forTimeInterval: Double(settleMs) / 1000.0)
+                print("[KeyboardSimulator] Modifiers cleared after \(elapsed)ms (+\(settleMs)ms settle)")
+                return
+            }
+            Thread.sleep(forTimeInterval: 0.01)
+        }
+        let flags = CGEventSource.flagsState(.combinedSessionState)
+        print("[KeyboardSimulator] Timed out (\(timeoutMs)ms) waiting for modifiers. Current flags: \(flags)")
     }
 
     /// Simulate Backspace key press

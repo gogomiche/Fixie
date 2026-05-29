@@ -4,8 +4,8 @@ import Foundation
 
 protocol LLMService {
     var providerName: String { get }
-    func correctGrammar(text: String) async throws -> String
-    func correctGrammarStreaming(text: String) -> AsyncThrowingStream<String, Error>
+    func correctText(text: String, systemPrompt: String) async throws -> String
+    func streamCorrection(text: String, systemPrompt: String) -> AsyncThrowingStream<String, Error>
 }
 
 // MARK: - Stream Parsing Strategy

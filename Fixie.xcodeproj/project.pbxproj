@@ -30,6 +30,8 @@
 		A1000022 /* MarkdownRenderer.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000024; };
 		A1000023 /* HTMLToMarkdown.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000025; };
 		A1000024 /* QuillDeltaParser.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000026; };
+		A1000025 /* UpdateChecker.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000027; };
+		A1000026 /* GrammarMode.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000028; };
 		C1000001 /* LLMServiceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C2000001; };
 		C1000002 /* SettingsTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C2000002; };
 		C1000003 /* GrammarCheckStateTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C2000003; };
@@ -68,6 +70,8 @@
 		A2000024 /* MarkdownRenderer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MarkdownRenderer.swift; sourceTree = "<group>"; };
 		A2000025 /* HTMLToMarkdown.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HTMLToMarkdown.swift; sourceTree = "<group>"; };
 		A2000026 /* QuillDeltaParser.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QuillDeltaParser.swift; sourceTree = "<group>"; };
+		A2000027 /* UpdateChecker.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UpdateChecker.swift; sourceTree = "<group>"; };
+		A2000028 /* GrammarMode.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GrammarMode.swift; sourceTree = "<group>"; };
 		A2000011 /* SettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsView.swift; sourceTree = "<group>"; };
 		A2000012 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
 		A2000014 /* GrammarPopupView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GrammarPopupView.swift; sourceTree = "<group>"; };
@@ -130,6 +134,7 @@
 			children = (
 				A2000003 /* Settings.swift */,
 				A2000022 /* GrammarCheckState.swift */,
+				A2000028 /* GrammarMode.swift */,
 			);
 			path = Models;
 			sourceTree = "<group>";
@@ -169,6 +174,7 @@
 				A2000024 /* MarkdownRenderer.swift */,
 				A2000025 /* HTMLToMarkdown.swift */,
 				A2000026 /* QuillDeltaParser.swift */,
+				A2000027 /* UpdateChecker.swift */,
 			);
 			path = Utilities;
 			sourceTree = "<group>";
@@ -315,6 +321,8 @@
 				A1000022 /* MarkdownRenderer.swift in Sources */,
 				A1000023 /* HTMLToMarkdown.swift in Sources */,
 				A1000024 /* QuillDeltaParser.swift in Sources */,
+				A1000025 /* UpdateChecker.swift in Sources */,
+				A1000026 /* GrammarMode.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

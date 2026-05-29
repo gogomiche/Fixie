@@ -9,6 +9,7 @@ struct GrammarPopupView: View {
     let streamingText: String
     let providerName: String
     let sourceAppIcon: NSImage?
+    let mode: GrammarMode
     let onAccept: () -> Void
     let onReject: () -> Void
 
@@ -50,7 +51,7 @@ struct GrammarPopupView: View {
                         .aspectRatio(contentMode: .fit)
                         .frame(width: 28, height: 28)
                 }
-                Text("Fix Spelling and Grammar")
+                Text(mode.popupTitle)
                     .font(.system(size: 14, weight: .medium))
                     .foregroundColor(.white.opacity(0.9))
                 Spacer()
@@ -66,7 +67,7 @@ struct GrammarPopupView: View {
                         HStack(spacing: 10) {
                             ProgressView()
                                 .scaleEffect(0.8)
-                            Text(streamingText.isEmpty ? "Checking grammar..." : streamingText)
+                            Text(streamingText.isEmpty ? mode.loadingLabel : streamingText)
                                 .font(.system(size: 15))
                                 .foregroundColor(streamingText.isEmpty ? .white.opacity(0.5) : .white.opacity(0.9))
                                 .lineSpacing(6)
@@ -282,6 +283,7 @@ struct StreamingGrammarPopupView: View {
     @ObservedObject var streamingState: StreamingState
     let providerName: String
     let sourceAppIcon: NSImage?
+    let mode: GrammarMode
     let onAccept: () -> Void
     let onReject: () -> Void
 
@@ -293,6 +295,7 @@ struct StreamingGrammarPopupView: View {
             streamingText: streamingState.text,
             providerName: providerName,
             sourceAppIcon: sourceAppIcon,
+            mode: mode,
             onAccept: streamingState.isComplete ? onAccept : {},
             onReject: onReject
         )
@@ -310,6 +313,7 @@ struct StreamingGrammarPopupView: View {
         }(),
         providerName: "GPT-4o mini",
         sourceAppIcon: NSImage(systemSymbolName: "doc.text", accessibilityDescription: nil),
+        mode: .grammar,
         onAccept: {},
         onReject: {}
     )

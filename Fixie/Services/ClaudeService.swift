@@ -36,10 +36,10 @@ final class ClaudeService: BaseLLMService {
         request.addValue("2023-06-01", forHTTPHeaderField: "anthropic-version")
     }
 
-    override func buildRequestBody(text: String, stream: Bool) -> [String: Any] {
+    override func buildRequestBody(text: String, stream: Bool, systemPrompt: String) -> [String: Any] {
         var body: [String: Any] = [
             "model": model,
-            "system": PromptBuilder.systemPrompt,
+            "system": systemPrompt,
             "max_tokens": 4096,
             "messages": [
                 ["role": "user", "content": PromptBuilder.userMessage(for: text)]
