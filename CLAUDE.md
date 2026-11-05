@@ -116,7 +116,15 @@ DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer xcodebuild -project Fix
 /usr/libexec/PlistBuddy -c "Print :CFBundleShortVersionString" ~/Library/Developer/Xcode/DerivedData/Fixie-*/Build/Products/Debug/Fixie.app/Contents/Info.plist
 ```
 
-### Build, sign, and package the DMG
+### Automated release (preferred)
+
+`.github/workflows/release.yml` runs on a macOS runner (no local Xcode needed): on every PR it runs the unit tests (except `KeychainManagerTests`) and a Release build; on a pushed `v*` tag it also checks `MARKETING_VERSION` matches the tag, ad-hoc signs, builds `Fixie.dmg` and attaches it to a **draft** release. Review the notes, then publish with `gh release edit vX.Y.Z --draft=false --latest`.
+
+```bash
+git tag v1.4.0 && git push origin v1.4.0   # after bumping MARKETING_VERSION / CURRENT_PROJECT_VERSION on main
+```
+
+### Build, sign, and package the DMG (manual)
 
 There is no Apple Developer Program account — the app is **ad-hoc signed**. Users get a Gatekeeper warning on first launch (right-click → Open).
 
