@@ -9,61 +9,29 @@ final class AccessibilityManager {
     private var savedAppRequiresFallback: Bool = false
     private var savedSelectedRange: CFRange?
     private var enabledAccessibilityPIDs: Set<pid_t> = []
-    private var electronDetectionCache: [String: Bool] = [:]
-    private var browserDetectionCache: [String: Bool] = [:]
+    private var classificationCache: [String: AppClassifier.Kind] = [:]
 
     private init() {}
 
     // MARK: - App Classification
 
-    /// Returns true if the app bundle contains "Electron Framework.framework".
-    /// Covers Slack, WhatsApp (older versions), Notion, Linear, Discord, VSCode,
-    /// Claude desktop, Spotify, Figma, Teams, etc. Result is cached per bundle ID.
-    private func isElectronApp(_ app: NSRunningApplication) -> Bool {
-        guard let bundleID = app.bundleIdentifier else { return false }
-        if let cached = electronDetectionCache[bundleID] {
+    /// Classify an app (cached per bundle ID). See `AppClassifier`.
+    func classify(_ app: NSRunningApplication) -> AppClassifier.Kind {
+        guard let bundleID = app.bundleIdentifier, let bundleURL = app.bundleURL else { return .native }
+        if let cached = classificationCache[bundleID] {
             return cached
         }
-        guard let bundleURL = app.bundleURL else {
-            electronDetectionCache[bundleID] = false
-            return false
-        }
-        let frameworkPath = bundleURL
-            .appendingPathComponent("Contents/Frameworks/Electron Framework.framework")
-            .path
-        let isElectron = FileManager.default.fileExists(atPath: frameworkPath)
-        electronDetectionCache[bundleID] = isElectron
-        return isElectron
+        let kind = AppClassifier.classify(bundleURL: bundleURL)
+        classificationCache[bundleID] = kind
+        print("[Accessibility] \(app.localizedName ?? bundleID) classified as \(kind.rawValue)")
+        return kind
     }
 
-    /// Returns true if the app declares itself as an http/https URL handler in
-    /// its Info.plist — any real browser does this so it can be set as the
-    /// system default. Covers Safari, Chrome, Firefox, Brave, Edge, Arc, Dia,
-    /// Vivaldi, Opera, and any future browser without needing a hardcoded list.
-    private func isBrowser(_ app: NSRunningApplication) -> Bool {
-        guard let bundleID = app.bundleIdentifier else { return false }
-        if let cached = browserDetectionCache[bundleID] {
-            return cached
-        }
-        guard let bundleURL = app.bundleURL,
-              let bundle = Bundle(url: bundleURL),
-              let urlTypes = bundle.infoDictionary?["CFBundleURLTypes"] as? [[String: Any]] else {
-            browserDetectionCache[bundleID] = false
-            return false
-        }
-        let handlesHTTP = urlTypes.contains { entry in
-            guard let schemes = entry["CFBundleURLSchemes"] as? [String] else { return false }
-            let lowered = schemes.map { $0.lowercased() }
-            return lowered.contains("http") || lowered.contains("https")
-        }
-        browserDetectionCache[bundleID] = handlesHTTP
-        return handlesHTTP
-    }
-
-    /// An app requires clipboard+paste fallback if it's an Electron app or a
-    /// browser — both render content where AX writes silently fail.
+    /// Electron apps, browsers and Mac Catalyst apps (WhatsApp…) need the
+    /// clipboard + paste path: AX reads return garbled text or AX writes
+    /// silently do nothing.
     private func appRequiresFallback(_ app: NSRunningApplication) -> Bool {
-        return isElectronApp(app) || isBrowser(app)
+        classify(app).requiresClipboardFallback
     }
 
     // MARK: - Permission Management
@@ -243,7 +211,12 @@ final class AccessibilityManager {
     /// selection range first. This prevents the "insert at cursor instead of
     /// replace" failure when the selection has been collapsed between read
     /// and write (e.g. user clicked in the popup).
-    /// Returns true if AX reports success.
+    ///
+    /// Returns true only if the write is confirmed: some apps (Mac Catalyst
+    /// text views, for instance) answer `.success` without changing anything,
+    /// so the element's value is compared before and after. When nothing
+    /// changed, the caller falls back to clipboard + paste — which is safe
+    /// because the original selection is still in place.
     func writeReplacingSelection(_ text: String, element: AXUIElement, range: CFRange?) -> Bool {
         if var mutableRange = range {
             if let rangeValue = AXValueCreate(.cfRange, &mutableRange) {
@@ -256,12 +229,44 @@ final class AccessibilityManager {
             }
         }
 
+        let valueBefore = stringValue(of: element)
+
         let result = AXUIElementSetAttributeValue(
             element,
             kAXSelectedTextAttribute as CFString,
             text as CFTypeRef
         )
-        return result == .success
+        guard result == .success else {
+            print("[Accessibility] AX write failed: \(result.rawValue)")
+            return false
+        }
+
+        // Can't verify (no readable value, or a huge document): trust AX.
+        guard let before = valueBefore, (before as NSString).length < 2_000_000 else { return true }
+
+        // Replacing the selection with identical text legitimately changes nothing.
+        if let range = range {
+            let ns = before as NSString
+            let r = NSRange(location: range.location, length: range.length)
+            if r.location >= 0, NSMaxRange(r) <= ns.length, ns.substring(with: r) == text {
+                return true
+            }
+        }
+
+        if stringValue(of: element) != before { return true }
+        // Give apps that update their AX value asynchronously a moment.
+        Thread.sleep(forTimeInterval: 0.1)
+        if stringValue(of: element) != before { return true }
+
+        print("[Accessibility] AX write reported success but the value is unchanged — not trusting it")
+        return false
+    }
+
+    private func stringValue(of element: AXUIElement) -> String? {
+        var value: CFTypeRef?
+        guard AXUIElementCopyAttributeValue(element, kAXValueAttribute as CFString, &value) == .success,
+              let v = value, CFGetTypeID(v) == CFStringGetTypeID() else { return nil }
+        return (v as! String)
     }
 
     /// Set selected text using the saved focused element

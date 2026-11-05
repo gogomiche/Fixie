@@ -1,0 +1,23 @@
+<!doctype html><html><head><meta charset="utf-8"></head><body><div id="editor"></div>
+<script>/*QA-COMMON*/</script>
+<script type="module">
+// TipTap 2 = ProseMirror (block editors like Notion-style tools, Linear, GitLab…)
+import { Editor } from 'https://esm.sh/@tiptap/core@2';
+import StarterKit from 'https://esm.sh/@tiptap/starter-kit@2';
+import Link from 'https://esm.sh/@tiptap/extension-link@2';
+import TaskList from 'https://esm.sh/@tiptap/extension-task-list@2';
+import TaskItem from 'https://esm.sh/@tiptap/extension-task-item@2';
+const editor = new Editor({
+  element: document.getElementById('editor'),
+  extensions: [StarterKit, Link.configure({ openOnClick: false, autolink: false }), TaskList, TaskItem.configure({ nested: true })],
+});
+QAInstall({
+  root: () => editor.view.dom,
+  setHTML: h => editor.commands.setContent(h),
+  getHTML: () => editor.getHTML(),
+  getText: () => editor.view.dom.innerText,
+  clear: () => editor.commands.clearContent(true),
+  focusEnd: () => editor.commands.focus('end'),
+  selectAll: () => { editor.commands.focus(); editor.commands.selectAll(); },
+});
+</script></body></html>

@@ -30,6 +30,12 @@
 		A1000022 /* MarkdownRenderer.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000024; };
 		A1000023 /* HTMLToMarkdown.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000025; };
 		A1000024 /* QuillDeltaParser.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000026; };
+		A1000027 /* MarkdownToHTML.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000029; };
+		A1000028 /* AppClassifier.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000030; };
+		C1000006 /* HTMLToMarkdownTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C2000006; };
+		C1000007 /* MarkdownToHTMLTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C2000007; };
+		C1000008 /* QuillDeltaParserTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C2000008; };
+		C1000009 /* ClipboardAndAppClassifierTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C2000009; };
 		A1000025 /* UpdateChecker.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000027; };
 		A1000026 /* GrammarMode.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000028; };
 		C1000001 /* LLMServiceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C2000001; };
@@ -70,6 +76,12 @@
 		A2000024 /* MarkdownRenderer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MarkdownRenderer.swift; sourceTree = "<group>"; };
 		A2000025 /* HTMLToMarkdown.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HTMLToMarkdown.swift; sourceTree = "<group>"; };
 		A2000026 /* QuillDeltaParser.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QuillDeltaParser.swift; sourceTree = "<group>"; };
+		A2000029 /* MarkdownToHTML.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MarkdownToHTML.swift; sourceTree = "<group>"; };
+		A2000030 /* AppClassifier.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppClassifier.swift; sourceTree = "<group>"; };
+		C2000006 /* HTMLToMarkdownTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HTMLToMarkdownTests.swift; sourceTree = "<group>"; };
+		C2000007 /* MarkdownToHTMLTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MarkdownToHTMLTests.swift; sourceTree = "<group>"; };
+		C2000008 /* QuillDeltaParserTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QuillDeltaParserTests.swift; sourceTree = "<group>"; };
+		C2000009 /* ClipboardAndAppClassifierTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ClipboardAndAppClassifierTests.swift; sourceTree = "<group>"; };
 		A2000027 /* UpdateChecker.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UpdateChecker.swift; sourceTree = "<group>"; };
 		A2000028 /* GrammarMode.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GrammarMode.swift; sourceTree = "<group>"; };
 		A2000011 /* SettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsView.swift; sourceTree = "<group>"; };
@@ -174,6 +186,8 @@
 				A2000024 /* MarkdownRenderer.swift */,
 				A2000025 /* HTMLToMarkdown.swift */,
 				A2000026 /* QuillDeltaParser.swift */,
+				A2000029 /* MarkdownToHTML.swift */,
+				A2000030 /* AppClassifier.swift */,
 				A2000027 /* UpdateChecker.swift */,
 			);
 			path = Utilities;
@@ -196,6 +210,10 @@
 				C2000003 /* GrammarCheckStateTests.swift */,
 				C2000004 /* DiffCalculatorTests.swift */,
 				C2000005 /* KeychainManagerTests.swift */,
+				C2000006 /* HTMLToMarkdownTests.swift */,
+				C2000007 /* MarkdownToHTMLTests.swift */,
+				C2000008 /* QuillDeltaParserTests.swift */,
+				C2000009 /* ClipboardAndAppClassifierTests.swift */,
 			);
 			path = FixieTests;
 			sourceTree = "<group>";
@@ -321,6 +339,8 @@
 				A1000022 /* MarkdownRenderer.swift in Sources */,
 				A1000023 /* HTMLToMarkdown.swift in Sources */,
 				A1000024 /* QuillDeltaParser.swift in Sources */,
+				A1000027 /* MarkdownToHTML.swift in Sources */,
+				A1000028 /* AppClassifier.swift in Sources */,
 				A1000025 /* UpdateChecker.swift in Sources */,
 				A1000026 /* GrammarMode.swift in Sources */,
 			);
@@ -335,6 +355,10 @@
 				C1000003 /* GrammarCheckStateTests.swift in Sources */,
 				C1000004 /* DiffCalculatorTests.swift in Sources */,
 				C1000005 /* KeychainManagerTests.swift in Sources */,
+				C1000006 /* HTMLToMarkdownTests.swift in Sources */,
+				C1000007 /* MarkdownToHTMLTests.swift in Sources */,
+				C1000008 /* QuillDeltaParserTests.swift in Sources */,
+				C1000009 /* ClipboardAndAppClassifierTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -473,7 +497,7 @@
 				CODE_SIGN_ENTITLEMENTS = Fixie/Fixie.entitlements;
 				CODE_SIGN_STYLE = Automatic;
 				COMBINE_HIDPI_IMAGES = YES;
-				CURRENT_PROJECT_VERSION = 4;
+				CURRENT_PROJECT_VERSION = 5;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = Fixie/Info.plist;
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.productivity";
@@ -483,7 +507,7 @@
 					"$(inherited)",
 					"@executable_path/../Frameworks",
 				);
-				MARKETING_VERSION = 1.3.1;
+				MARKETING_VERSION = 1.4.0;
 				PRODUCT_BUNDLE_IDENTIFIER = com.gogomiche.Fixie;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_EMIT_LOC_STRINGS = YES;
@@ -499,7 +523,7 @@
 				CODE_SIGN_ENTITLEMENTS = Fixie/Fixie.entitlements;
 				CODE_SIGN_STYLE = Automatic;
 				COMBINE_HIDPI_IMAGES = YES;
-				CURRENT_PROJECT_VERSION = 4;
+				CURRENT_PROJECT_VERSION = 5;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = Fixie/Info.plist;
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.productivity";
@@ -509,7 +533,7 @@
 					"$(inherited)",
 					"@executable_path/../Frameworks",
 				);
-				MARKETING_VERSION = 1.3.1;
+				MARKETING_VERSION = 1.4.0;
 				PRODUCT_BUNDLE_IDENTIFIER = com.gogomiche.Fixie;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_EMIT_LOC_STRINGS = YES;

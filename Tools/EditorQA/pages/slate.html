@@ -1,0 +1,118 @@
+<!doctype html><html><head><meta charset="utf-8"></head><body><div id="app"></div>
+<script>/*QA-COMMON*/</script>
+<script type="module">
+// Slate (+ slate-react): the framework Slite's editor is built on.
+// Slate has no HTML paste out of the box, apps add a deserializer — this one
+// follows Slate's official "paste-html" example.
+import React from 'https://esm.sh/react@18.3.1';
+import { createRoot } from 'https://esm.sh/react-dom@18.3.1/client?deps=react@18.3.1';
+import { createEditor, Transforms, Editor, Text, Element } from 'https://esm.sh/slate@0.110.2';
+import { Slate, Editable, withReact, ReactEditor } from 'https://esm.sh/slate-react@0.110.3?deps=react@18.3.1,react-dom@18.3.1,slate@0.110.2';
+import { withHistory } from 'https://esm.sh/slate-history@0.110.3?deps=slate@0.110.2';
+const h = React.createElement;
+
+const ELEMENT_TAGS = {
+  A: el => ({ type: 'link', url: el.getAttribute('href') }),
+  BLOCKQUOTE: () => ({ type: 'quote' }),
+  H1: () => ({ type: 'heading', level: 1 }), H2: () => ({ type: 'heading', level: 2 }),
+  H3: () => ({ type: 'heading', level: 3 }), H4: () => ({ type: 'heading', level: 4 }),
+  LI: () => ({ type: 'list-item' }),
+  OL: () => ({ type: 'numbered-list' }),
+  P: () => ({ type: 'paragraph' }),
+  PRE: () => ({ type: 'code' }),
+  UL: () => ({ type: 'bulleted-list' }),
+};
+const TEXT_TAGS = {
+  CODE: () => ({ code: true }), DEL: () => ({ strikethrough: true }), S: () => ({ strikethrough: true }),
+  EM: () => ({ italic: true }), I: () => ({ italic: true }),
+  STRONG: () => ({ bold: true }), B: () => ({ bold: true }),
+};
+
+function deserialize(el) {
+  if (el.nodeType === 3) return el.textContent;
+  if (el.nodeType !== 1) return null;
+  if (el.nodeName === 'BR') return '\n';
+  let parent = el;
+  if (el.nodeName === 'PRE' && el.firstChild && el.firstChild.nodeName === 'CODE') parent = el.firstChild;
+  let children = Array.from(parent.childNodes).map(deserialize).flat().filter(c => c !== null);
+  if (children.length === 0) children = [''];
+  const toNodes = cs => cs.map(c => typeof c === 'string' ? { text: c } : c);
+  if (ELEMENT_TAGS[el.nodeName]) return { ...ELEMENT_TAGS[el.nodeName](el), children: toNodes(children) };
+  if (TEXT_TAGS[el.nodeName]) {
+    const attrs = TEXT_TAGS[el.nodeName](el);
+    return children.map(c => typeof c === 'string' ? { text: c, ...attrs } : (Text.isText(c) ? { ...c, ...attrs } : c));
+  }
+  return children;
+}
+
+const isInlineNode = n => typeof n === 'string' || Text.isText(n) || (n && n.type === 'link');
+// Group loose inline runs at block level into paragraphs.
+function blocks(nodes) {
+  const out = []; let run = [];
+  const flush = () => { if (run.length) { out.push({ type: 'paragraph', children: run.map(c => typeof c === 'string' ? { text: c } : c) }); run = []; } };
+  for (const n of nodes) {
+    if (isInlineNode(n)) { if (!(typeof n === 'string' && !n.trim() && run.length === 0)) run.push(n); }
+    else { flush(); out.push(n.children && n.type !== 'paragraph' && n.type !== 'heading' && n.type !== 'code' && n.type !== 'list-item'
+      ? { ...n, children: n.type === 'quote' ? blocks(n.children) : n.children } : n); }
+  }
+  flush();
+  return out.length ? out : [{ type: 'paragraph', children: [{ text: '' }] }];
+}
+const fromHTML = html => blocks([deserialize(new DOMParser().parseFromString(html, 'text/html').body)].flat());
+
+const withHtml = editor => {
+  const { insertData, isInline } = editor;
+  editor.isInline = el => el.type === 'link' || isInline(el);
+  editor.insertData = data => {
+    const html = data.getData('text/html');
+    if (html) { Transforms.insertFragment(editor, fromHTML(html)); return; }
+    insertData(data);
+  };
+  return editor;
+};
+
+const editor = withHtml(withReact(withHistory(createEditor())));
+const renderElement = ({ attributes, children, element }) => {
+  switch (element.type) {
+    case 'quote': return h('blockquote', attributes, children);
+    case 'code': return h('pre', attributes, h('code', null, children));
+    case 'bulleted-list': return h('ul', attributes, children);
+    case 'numbered-list': return h('ol', attributes, children);
+    case 'list-item': return h('li', attributes, children);
+    case 'heading': return h('h' + (element.level || 2), attributes, children);
+    case 'link': return h('a', { ...attributes, href: element.url }, children);
+    default: return h('p', attributes, children);
+  }
+};
+const renderLeaf = ({ attributes, children, leaf }) => {
+  if (leaf.bold) children = h('strong', null, children);
+  if (leaf.code) children = h('code', null, children);
+  if (leaf.italic) children = h('em', null, children);
+  if (leaf.strikethrough) children = h('del', null, children);
+  return h('span', attributes, children);
+};
+const initial = [{ type: 'paragraph', children: [{ text: '' }] }];
+function App() {
+  return h(Slate, { editor, initialValue: initial }, h(Editable, { renderElement, renderLeaf, id: 'slate-root', style: { minHeight: '200px' } }));
+}
+createRoot(document.getElementById('app')).render(h(App));
+
+const reset = nodes => {
+  Transforms.deselect(editor);
+  editor.children = nodes;
+  // Same normalization a real paste goes through (insertFragment)
+  Editor.normalize(editor, { force: true });
+  editor.onChange();
+};
+const waitRoot = async () => { for (let i = 0; i < 100 && !document.querySelector('[data-slate-editor]'); i++) await QAUtil.sleep(50); };
+await waitRoot();
+QAInstall({
+  root: () => document.querySelector('[data-slate-editor]'),
+  setHTML: h => reset(fromHTML(h)),
+  getHTML: () => document.querySelector('[data-slate-editor]').innerHTML,
+  getText: () => document.querySelector('[data-slate-editor]').innerText,
+  clear: () => reset([{ type: 'paragraph', children: [{ text: '' }] }]),
+  focusEnd: () => { ReactEditor.focus(editor); Transforms.select(editor, Editor.end(editor, [])); },
+  selectAll: () => { ReactEditor.focus(editor); Transforms.select(editor, Editor.range(editor, [])); },
+});
+</script></body></html>

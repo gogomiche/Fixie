@@ -1,0 +1,18 @@
+<!doctype html><html><head><meta charset="utf-8">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/quill@2.0.3/dist/quill.snow.css">
+</head><body><div id="editor"></div>
+<script>/*QA-COMMON*/</script>
+<script src="https://cdn.jsdelivr.net/npm/quill@2.0.3/dist/quill.js"></script>
+<script>
+// Quill 2: current Quill; same Delta model as Slack.
+const quill = new Quill('#editor', { theme: 'snow', modules: { toolbar: false } });
+QAInstall({
+  root: () => quill.root,
+  setHTML: h => { quill.setContents([]); quill.clipboard.dangerouslyPasteHTML(0, h); },
+  getHTML: () => quill.getSemanticHTML(),
+  getText: () => quill.getText(),
+  clear: () => quill.setContents([]),
+  focusEnd: () => { quill.focus(); quill.setSelection(quill.getLength(), 0); },
+  selectAll: () => { quill.focus(); quill.setSelection(0, quill.getLength()); },
+});
+</script></body></html>

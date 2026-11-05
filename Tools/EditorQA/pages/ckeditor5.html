@@ -1,0 +1,24 @@
+<!doctype html><html><head><meta charset="utf-8">
+<link rel="stylesheet" href="https://cdn.ckeditor.com/ckeditor5/43.3.1/ckeditor5.css">
+</head><body><div id="editor"></div>
+<script>/*QA-COMMON*/</script>
+<script src="https://cdn.ckeditor.com/ckeditor5/43.3.1/ckeditor5.umd.js"></script>
+<script>
+// CKEditor 5: CMS / back-office / helpdesk tools.
+const { ClassicEditor, Essentials, Paragraph, Bold, Italic, Strikethrough, Code, Link, List, TodoList, BlockQuote, Heading, CodeBlock } = CKEDITOR;
+ClassicEditor.create(document.querySelector('#editor'), {
+  plugins: [Essentials, Paragraph, Bold, Italic, Strikethrough, Code, Link, List, TodoList, BlockQuote, Heading, CodeBlock],
+  toolbar: [],
+}).then(editor => {
+  const root = () => editor.editing.view.getDomRoot();
+  QAInstall({
+    root,
+    setHTML: h => editor.setData(h),
+    getHTML: () => editor.getData(),
+    getText: () => root().innerText,
+    clear: () => editor.setData(''),
+    focusEnd: () => { editor.editing.view.focus(); editor.model.change(w => w.setSelection(editor.model.document.getRoot(), 'end')); },
+    selectAll: () => { editor.editing.view.focus(); editor.execute('selectAll'); },
+  });
+}).catch(e => { window.QAError = String(e && e.stack || e); });
+</script></body></html>
