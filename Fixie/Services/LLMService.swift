@@ -127,13 +127,13 @@ class LLMServiceFactory {
         case .claude:
             return ClaudeService(
                 apiKey: config.apiKey ?? "",
-                model: config.model ?? "claude-sonnet-4-20250514",
+                model: config.model ?? ModelCatalog.defaultClaude,
                 timeout: config.timeout
             )
         case .openai:
             return OpenAIService(
                 apiKey: config.apiKey ?? "",
-                model: config.model ?? "gpt-4o-mini",
+                model: config.model ?? ModelCatalog.defaultOpenAI,
                 timeout: config.timeout
             )
         case .ollama:
@@ -152,13 +152,13 @@ class LLMServiceFactory {
         case .claude:
             return ClaudeService(
                 apiKey: configuration.apiKey ?? "",
-                model: configuration.model ?? "claude-sonnet-4-20250514",
+                model: configuration.model ?? ModelCatalog.defaultClaude,
                 timeout: configuration.timeout
             )
         case .openai:
             return OpenAIService(
                 apiKey: configuration.apiKey ?? "",
-                model: configuration.model ?? "gpt-4o-mini",
+                model: configuration.model ?? ModelCatalog.defaultOpenAI,
                 timeout: configuration.timeout
             )
         case .ollama:

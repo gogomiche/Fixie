@@ -19,7 +19,7 @@ final class ClaudeService: BaseLLMService {
         }
     }
 
-    init(apiKey: String, model: String = "claude-sonnet-4-20250514", timeout: TimeInterval = ServiceConfiguration.defaultTimeout) {
+    init(apiKey: String, model: String = ModelCatalog.defaultClaude, timeout: TimeInterval = ServiceConfiguration.defaultTimeout) {
         self.apiKey = apiKey
         self.model = model
         super.init(timeout: timeout)
