@@ -1,0 +1,34 @@
+<!doctype html><html><head><meta charset="utf-8"></head><body>
+<div id="editor" contenteditable="true" style="min-height:200px"></div>
+<script>/*QA-COMMON*/</script>
+<script src="https://cdn.jsdelivr.net/npm/prismjs@1.29.0/prism.min.js"></script>
+<script type="module">
+// Lexical (Meta): WhatsApp Web, Facebook, many newer web apps.
+import { createEditor, $getRoot, $createParagraphNode, $insertNodes } from 'https://esm.sh/lexical@0.21.0';
+import { registerRichText, HeadingNode, QuoteNode } from 'https://esm.sh/@lexical/rich-text@0.21.0';
+import { ListNode, ListItemNode } from 'https://esm.sh/@lexical/list@0.21.0';
+import { LinkNode, AutoLinkNode } from 'https://esm.sh/@lexical/link@0.21.0';
+import { CodeNode, CodeHighlightNode } from 'https://esm.sh/@lexical/code@0.21.0';
+import { $generateHtmlFromNodes, $generateNodesFromDOM } from 'https://esm.sh/@lexical/html@0.21.0';
+const rootEl = document.getElementById('editor');
+const editor = createEditor({
+  namespace: 'qa', onError: e => { window.QAError = String(e); },
+  nodes: [HeadingNode, QuoteNode, ListNode, ListItemNode, LinkNode, AutoLinkNode, CodeNode, CodeHighlightNode],
+});
+editor.setRootElement(rootEl);
+registerRichText(editor);
+const discrete = fn => editor.update(fn, { discrete: true });
+QAInstall({
+  root: () => rootEl,
+  setHTML: h => discrete(() => {
+    const dom = new DOMParser().parseFromString(h, 'text/html');
+    const nodes = $generateNodesFromDOM(editor, dom);
+    const root = $getRoot(); root.clear(); root.select(); $insertNodes(nodes);
+  }),
+  getHTML: () => { let out = ''; discrete(() => { out = $generateHtmlFromNodes(editor, null); }); return out; },
+  getText: () => rootEl.innerText,
+  clear: () => discrete(() => { const root = $getRoot(); root.clear(); root.append($createParagraphNode()); }),
+  focusEnd: () => { rootEl.focus(); discrete(() => $getRoot().selectEnd()); },
+  selectAll: () => { rootEl.focus(); discrete(() => { const r = $getRoot(); r.select(0, r.getChildrenSize()); }); },
+});
+</script></body></html>

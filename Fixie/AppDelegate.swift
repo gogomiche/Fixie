@@ -16,6 +16,9 @@ class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCenterDele
     // Grammar check state
     var currentOriginalText: String = ""
     var currentCorrectedText: String = ""
+    /// Format of the captured text — decides which clipboard flavors are
+    /// written back (rich HTML for Slack/Slite/Notion, plain otherwise).
+    var currentTextFormat: TextFormat = .plain
     var streamingState = StreamingState()
     var usedAccessibilityForRead: Bool = false
     var isProcessing: Bool = false
@@ -128,7 +131,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCenterDele
         previousApp = NSWorkspace.shared.frontmostApplication
         print("[Fixie] Saved previous app: \(previousApp?.localizedName ?? "nil") (mode: \(mode.rawValue))")
 
-        // For Electron/web apps, skip Accessibility API (can return garbled/lowercase text)
+        // For Electron/web/Catalyst apps, skip Accessibility API (garbled reads, ignored writes)
         let useClipboardOnly = accessibilityManager.frontmostAppRequiresFallback
         print("[Fixie] Frontmost app requires clipboard fallback: \(useClipboardOnly)")
 
@@ -139,6 +142,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCenterDele
                 print("[Fixie] Accessibility API succeeded: \(selectedText.prefix(50))...")
                 usedAccessibilityForRead = true
                 currentOriginalText = selectedText
+                currentTextFormat = .plain
                 processText(text: selectedText, mode: mode)
                 return
             }
@@ -147,6 +151,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCenterDele
 
         // Fall back to clipboard simulation (Cmd+C)
         usedAccessibilityForRead = false
+        accessibilityManager.clearSavedElement()
         clipboardManager.saveCurrentContent()
         clipboardManager.clear()
 
@@ -166,13 +171,14 @@ class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCenterDele
             let post = NSPasteboard.general.changeCount
             print("[Fixie] Post-copy: changeCount=\(post) (was \(preCopyChangeCount))")
 
-            // Prefer HTML→markdown from clipboard (preserves formatting from web/Electron apps)
+            // Prefer HTML/Quill→markdown from clipboard (preserves formatting from web/Electron apps)
             let clipboardContent = self.clipboardManager.getContentPreferringMarkdown()
-            print("[Fixie] Clipboard content after copy: \(clipboardContent?.prefix(50) ?? "nil")")
+            print("[Fixie] Clipboard content after copy (\(String(describing: clipboardContent?.format))): \(clipboardContent?.text.prefix(50) ?? "nil")")
 
-            if let selectedText = clipboardContent, !selectedText.isEmpty {
-                self.currentOriginalText = selectedText
-                self.processText(text: selectedText, mode: mode)
+            if let captured = clipboardContent, !captured.text.isEmpty {
+                self.currentOriginalText = captured.text
+                self.currentTextFormat = captured.format
+                self.processText(text: captured.text, mode: mode)
             } else {
                 print("[Fixie] No text in clipboard, showing alert")
                 self.clipboardManager.restoreSavedContent()
@@ -270,9 +276,12 @@ class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCenterDele
         }
 
         let textToPaste = currentCorrectedText
+        let textFormat = currentTextFormat
         let savedElement = accessibilityManager.getSavedElement()
         let savedRange = accessibilityManager.savedSelectionRange
-        let requiresTypingFallback = accessibilityManager.savedAppRequiresTypingFallback
+        // Clipboard path when the app can't be trusted with AX writes, or when
+        // the text was captured via ⌘C in the first place (AX read failed).
+        let requiresTypingFallback = accessibilityManager.savedAppRequiresTypingFallback || !usedAccessibilityForRead
 
         // Use the app saved at the start of triggerGrammarCheck(), not the current frontmost app
         let targetApp = self.previousApp
@@ -285,14 +294,24 @@ class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCenterDele
         // Reset state immediately
         isProcessing = false
         currentCorrectedText = ""
+        currentTextFormat = .plain
         accessibilityManager.clearSavedElement()
 
-        // For Electron/web apps, use clipboard + paste
-        if requiresTypingFallback {
-            print("[Fixie] Using clipboard + paste for Electron/web app")
+        // Nothing to change: don't touch the document at all.
+        if textToPaste == currentOriginalText.trimmingCharacters(in: .whitespacesAndNewlines) {
+            print("[Fixie] acceptCorrection: text unchanged, nothing to insert")
+            clipboardManager.restoreSavedContent()
+            popupManager.closeWindow()
+            return
+        }
 
-            // Set clipboard content FIRST
-            clipboardManager.setContent(textToPaste)
+        // For Electron/web/Catalyst apps, use clipboard + paste
+        if requiresTypingFallback {
+            print("[Fixie] Using clipboard + paste (format: \(textFormat))")
+
+            // Set clipboard content FIRST (rich HTML + plain when the source was rich)
+            clipboardManager.saveCurrentContentIfNeeded()
+            clipboardManager.setContent(textToPaste, format: textFormat)
 
             // Close popup window (this deactivates Fixie)
             popupManager.closeWindow()
@@ -343,7 +362,8 @@ class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCenterDele
 
                 // Fallback: clipboard + paste
                 print("[Fixie] Using clipboard + paste fallback")
-                self.clipboardManager.setContent(textToPaste)
+                self.clipboardManager.saveCurrentContentIfNeeded()
+                self.clipboardManager.setContent(textToPaste, format: textFormat)
 
                 if let app = targetApp {
                     app.activate(options: [.activateIgnoringOtherApps])

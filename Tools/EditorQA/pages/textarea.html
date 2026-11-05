@@ -1,0 +1,18 @@
+<!doctype html><html><head><meta charset="utf-8"></head><body>
+<textarea id="editor" rows="20" cols="80"></textarea>
+<script>/*QA-COMMON*/</script>
+<script>
+// Plain <textarea>: plain-text fields (search boxes, commit messages, many chat inputs).
+const ta = document.getElementById('editor');
+const esc = s => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+QAInstall({
+  root: () => ta,
+  setHTML: h => { const d = document.createElement('div'); d.innerHTML = h; document.body.appendChild(d); ta.value = d.innerText; d.remove(); },
+  getHTML: () => esc(ta.value).replace(/\n/g, '<br>'),
+  getText: () => ta.value,
+  clear: () => { ta.value = ''; },
+  focusEnd: () => { ta.focus(); ta.setSelectionRange(ta.value.length, ta.value.length); },
+  selectAll: () => { ta.focus(); ta.select(); },
+  customCopy: () => ({ html: '', text: ta.value, source: 'textarea' }),
+});
+</script></body></html>
