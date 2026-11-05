@@ -398,15 +398,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCenterDele
         case .openai: modelId = settingsManager.openAIModel
         case .ollama: return settingsManager.ollamaModel
         }
-        let displayNames: [String: String] = [
-            "gpt-5.2": "GPT-5.2",
-            "gpt-5.2-mini": "GPT-5.2 Mini",
-            "gpt-4o": "GPT-4o",
-            "gpt-4o-mini": "GPT-4o Mini",
-            "claude-sonnet-4-20250514": "Claude Sonnet 4",
-            "claude-haiku-4-5-20251001": "Claude Haiku",
-        ]
-        return displayNames[modelId] ?? modelId
+        return ModelCatalog.displayName(for: modelId)
     }
 
     // MARK: - Alerts

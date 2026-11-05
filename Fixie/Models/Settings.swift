@@ -20,6 +20,64 @@ enum LLMProvider: String, CaseIterable, Codable {
     }
 }
 
+/// Models offered in Settings. One source of truth for the pickers, the
+/// popup's provider label and the upgrade of outdated saved choices.
+enum ModelCatalog {
+    struct Model: Identifiable, Equatable {
+        let id: String
+        let name: String
+    }
+
+    static let claude: [Model] = [
+        Model(id: "claude-sonnet-5-5", name: "Claude Sonnet 5.5"),
+        Model(id: "claude-haiku-5-5", name: "Claude Haiku 5.5 (fastest)"),
+        Model(id: "claude-opus-5-5", name: "Claude Opus 5.5 (most capable)"),
+        Model(id: "claude-fable-5-1", name: "Claude Fable 5.1"),
+    ]
+
+    static let openAI: [Model] = [
+        Model(id: "gpt-6-luna", name: "GPT-6 Luna (fastest)"),
+        Model(id: "gpt-6.1-terra", name: "GPT-6.1 Terra"),
+        Model(id: "gpt-6.1-sol", name: "GPT-6.1 Sol"),
+        Model(id: "gpt-6-astra", name: "GPT-6 Astra (most capable)"),
+    ]
+
+    static let defaultClaude = "claude-sonnet-5-5"
+    static let defaultOpenAI = "gpt-6-luna"
+
+    /// Models previously offered in the pickers → their current equivalent.
+    /// Custom model IDs typed by the user are never touched.
+    static let upgrades: [String: String] = [
+        "claude-sonnet-4-20250514": "claude-sonnet-5-5",
+        "claude-haiku-4-5-20251001": "claude-haiku-5-5",
+        "gpt-4o-mini": "gpt-6-luna",
+        "gpt-5.2-mini": "gpt-6-luna",
+        "gpt-4o": "gpt-6.1-terra",
+        "gpt-5.2": "gpt-6.1-sol",
+    ]
+
+    static func upgraded(_ modelID: String) -> String {
+        upgrades[modelID] ?? modelID
+    }
+
+    /// Rewrite outdated saved model choices in place.
+    static func migrateSavedModels(in defaults: UserDefaults, keys: [String]) {
+        for key in keys {
+            guard let saved = defaults.string(forKey: key) else { continue }
+            let current = upgraded(saved)
+            if current != saved {
+                defaults.set(current, forKey: key)
+            }
+        }
+    }
+
+    static func displayName(for modelID: String) -> String {
+        guard let model = (claude + openAI).first(where: { $0.id == modelID }) else { return modelID }
+        // Drop the "(fastest)"-style hints in compact labels
+        return model.name.components(separatedBy: " (").first ?? model.name
+    }
+}
+
 struct HotkeyConfig: Codable, Equatable {
     var keyCode: UInt32
     var modifiers: UInt32
@@ -204,8 +262,9 @@ class SettingsManager: ObservableObject {
 
         self.ollamaEndpoint = defaults.string(forKey: DefaultsKeys.ollamaEndpoint) ?? "http://localhost:11434"
         self.ollamaModel = defaults.string(forKey: DefaultsKeys.ollamaModel) ?? "llama3.2:3b"
-        self.openAIModel = defaults.string(forKey: DefaultsKeys.openAIModel) ?? "gpt-4o-mini"
-        self.claudeModel = defaults.string(forKey: DefaultsKeys.claudeModel) ?? "claude-sonnet-4-20250514"
+        ModelCatalog.migrateSavedModels(in: defaults, keys: [DefaultsKeys.openAIModel, DefaultsKeys.claudeModel])
+        self.openAIModel = defaults.string(forKey: DefaultsKeys.openAIModel) ?? ModelCatalog.defaultOpenAI
+        self.claudeModel = defaults.string(forKey: DefaultsKeys.claudeModel) ?? ModelCatalog.defaultClaude
         self.launchAtLogin = defaults.bool(forKey: DefaultsKeys.launchAtLogin)
 
         // Load per-mode hotkeys, with migration from the legacy single `hotkey` field.

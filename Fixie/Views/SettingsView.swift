@@ -178,8 +178,9 @@ struct SettingsView: View {
                     SecureField("Claude API Key", text: $settings.claudeAPIKey)
                         .textFieldStyle(.roundedBorder)
                     Picker("Model", selection: $settings.claudeModel) {
-                        Text("Claude Sonnet 4").tag("claude-sonnet-4-20250514")
-                        Text("Claude Haiku").tag("claude-haiku-4-5-20251001")
+                        ForEach(ModelCatalog.claude) { model in
+                            Text(model.name).tag(model.id)
+                        }
                     }
                     TextField("Custom model ID", text: $settings.claudeModel)
                         .textFieldStyle(.roundedBorder)
@@ -191,10 +192,9 @@ struct SettingsView: View {
                     SecureField("OpenAI API Key", text: $settings.openAIAPIKey)
                         .textFieldStyle(.roundedBorder)
                     Picker("Model", selection: $settings.openAIModel) {
-                        Text("GPT-5.2").tag("gpt-5.2")
-                        Text("GPT-5.2 Mini").tag("gpt-5.2-mini")
-                        Text("GPT-4o").tag("gpt-4o")
-                        Text("GPT-4o Mini").tag("gpt-4o-mini")
+                        ForEach(ModelCatalog.openAI) { model in
+                            Text(model.name).tag(model.id)
+                        }
                     }
                     TextField("Custom model ID", text: $settings.openAIModel)
                         .textFieldStyle(.roundedBorder)

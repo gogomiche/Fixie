@@ -77,6 +77,8 @@ Factory: `LLMServiceFactory.create(provider:settings:)`
 
 - `SettingsManager` persists non-sensitive settings in UserDefaults, API keys in macOS Keychain via `KeychainManager`
 - One-time migration from UserDefaults to Keychain happens in `SettingsManager.init()`
+- `ModelCatalog` (in `Settings.swift`) lists the models offered in Settings (Claude 5.x, GPT-6 family), the defaults, and `upgrades`: saved choices that were once presets are rewritten to their current equivalent at launch (`migrateSavedModels`); custom model IDs are never touched. When adding models, add the old preset → new mapping.
+- `OpenAIService` treats `gpt-5*`/`gpt-6*`/o-series as reasoning models: `max_completion_tokens`, no `temperature`, and the lowest accepted `reasoning_effort` (`none` for GPT-6 Terra/Luna, `low` for Astra/Sol).
 - `ServiceConfiguration` validates API key formats (prefix checks: `sk-ant-` for Claude, `sk-` for OpenAI)
 
 ### Singleton Managers

@@ -19,7 +19,7 @@ final class OpenAIService: BaseLLMService {
         }
     }
 
-    init(apiKey: String, model: String = "gpt-4o-mini", timeout: TimeInterval = ServiceConfiguration.defaultTimeout) {
+    init(apiKey: String, model: String = ModelCatalog.defaultOpenAI, timeout: TimeInterval = ServiceConfiguration.defaultTimeout) {
         self.apiKey = apiKey
         self.model = model
         super.init(timeout: timeout)
@@ -35,10 +35,21 @@ final class OpenAIService: BaseLLMService {
         request.addValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
     }
 
-    /// Reasoning models (o-series, gpt-5+) use different parameters than classic models
-    private var isReasoningModel: Bool {
+    /// Reasoning models (o-series, gpt-5+, gpt-6) use different parameters than classic models:
+    /// `max_completion_tokens` instead of `max_tokens`, no `temperature`.
+    var isReasoningModel: Bool {
         model.hasPrefix("o1") || model.hasPrefix("o3") || model.hasPrefix("o4") ||
-        model.hasPrefix("gpt-5")
+        model.hasPrefix("gpt-5") || model.hasPrefix("gpt-6")
+    }
+
+    /// Lowest reasoning effort the model accepts — proofreading doesn't need
+    /// deliberation, and every reasoning token adds latency.
+    /// GPT-6 Terra/Luna accept `none`; GPT-6 Astra/Sol start at `low`.
+    var reasoningEffort: String {
+        if model.hasPrefix("gpt-6"), model.contains("terra") || model.contains("luna") {
+            return "none"
+        }
+        return "low"
     }
 
     override func buildRequestBody(text: String, stream: Bool, systemPrompt: String) -> [String: Any] {
@@ -51,8 +62,10 @@ final class OpenAIService: BaseLLMService {
         ]
 
         if isReasoningModel {
-            body["max_completion_tokens"] = 4096
-            body["reasoning_effort"] = "low"
+            // Reasoning tokens count against this limit: leave room so long
+            // texts aren't cut off.
+            body["max_completion_tokens"] = 16384
+            body["reasoning_effort"] = reasoningEffort
         } else {
             body["max_tokens"] = 4096
             body["temperature"] = 0.3

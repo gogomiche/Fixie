@@ -102,3 +102,34 @@ final class LLMServiceTests: XCTestCase {
         XCTAssertFalse(normalLine.containsProblematicContent)
     }
 }
+
+final class OpenAIRequestBodyTests: XCTestCase {
+
+    private func body(_ model: String) -> [String: Any] {
+        OpenAIService(apiKey: "sk-test", model: model).buildRequestBody(text: "hi", stream: true, systemPrompt: "sys")
+    }
+
+    func testGPT6FastModelsUseNoReasoning() {
+        for model in ["gpt-6-luna", "gpt-6.1-terra"] {
+            let b = body(model)
+            XCTAssertEqual(b["reasoning_effort"] as? String, "none", model)
+            XCTAssertEqual(b["max_completion_tokens"] as? Int, 16384, model)
+            XCTAssertNil(b["temperature"], model)
+            XCTAssertNil(b["max_tokens"], model)
+        }
+    }
+
+    func testGPT6LargeModelsUseLowestSupportedEffort() {
+        for model in ["gpt-6-astra", "gpt-6.1-sol"] {
+            XCTAssertEqual(body(model)["reasoning_effort"] as? String, "low", model)
+            XCTAssertNil(body(model)["temperature"], model)
+        }
+    }
+
+    func testClassicModelsKeepTemperature() {
+        let b = body("gpt-4o")
+        XCTAssertEqual(b["temperature"] as? Double, 0.3)
+        XCTAssertEqual(b["max_tokens"] as? Int, 4096)
+        XCTAssertNil(b["reasoning_effort"])
+    }
+}
