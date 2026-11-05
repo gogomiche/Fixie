@@ -1,0 +1,73 @@
+# Builds, tests, ad-hoc signs and packages Fixie. On a pushed tag, attaches
+# Fixie.dmg to a DRAFT GitHub release — publish the draft once checked
+# (UpdateChecker only sees published releases). On pull requests, only
+# builds and tests.
+name: Release
+
+on:
+  pull_request:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Existing tag to build (e.g. v1.4.0)
+        required: true
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: macos-15
+    env:
+      TAG: ${{ github.event.inputs.tag || (github.event_name == 'pull_request' && '') || github.ref_name }}
+      SIGNING: CODE_SIGN_IDENTITY=- CODE_SIGN_STYLE=Manual DEVELOPMENT_TEAM=
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.TAG || github.ref }}
+
+      - name: Xcode version
+        run: xcodebuild -version
+
+      - name: Unit tests
+        # KeychainManager tests need an interactive login keychain
+        run: |
+          xcodebuild -project Fixie.xcodeproj -scheme Fixie -destination 'platform=macOS' \
+            -skip-testing:FixieTests/KeychainManagerTests $SIGNING test
+
+      - name: Build (Release)
+        run: |
+          xcodebuild -project Fixie.xcodeproj -scheme Fixie -configuration Release \
+            -derivedDataPath build $SIGNING clean build
+
+      - name: Check version matches tag
+        if: env.TAG != ''
+        run: |
+          V=$(/usr/libexec/PlistBuddy -c "Print :CFBundleShortVersionString" build/Build/Products/Release/Fixie.app/Contents/Info.plist)
+          echo "App version: $V"
+          if [ "v$V" != "$TAG" ] && [ "V$V" != "$TAG" ]; then
+            echo "::error::MARKETING_VERSION ($V) does not match tag ($TAG)"; exit 1
+          fi
+
+      - name: Sign and package DMG
+        run: |
+          STAGING="$RUNNER_TEMP/fixie-release" && rm -rf "$STAGING" && mkdir -p "$STAGING"
+          cp -R build/Build/Products/Release/Fixie.app "$STAGING/Fixie.app"
+          codesign --force --deep --sign - "$STAGING/Fixie.app"
+          codesign --verify --deep --strict "$STAGING/Fixie.app"
+          (cd "$STAGING" && ln -s /Applications Applications)
+          hdiutil create -volname "Fixie" -srcfolder "$STAGING" -ov -format UDZO "$RUNNER_TEMP/Fixie.dmg"
+          shasum -a 256 "$RUNNER_TEMP/Fixie.dmg" | tee "$RUNNER_TEMP/Fixie.dmg.sha256"
+
+      - name: Attach to draft release
+        if: env.TAG != ''
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            gh release upload "$TAG" "$RUNNER_TEMP/Fixie.dmg" --clobber
+          else
+            gh release create "$TAG" "$RUNNER_TEMP/Fixie.dmg" --draft --title "Fixie $TAG" --generate-notes
+          fi
