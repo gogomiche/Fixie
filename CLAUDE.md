@@ -38,7 +38,7 @@ Each mode has its own base system prompt + a user-editable custom appendix (Sett
 2. `HotkeyManager` dispatches by `EventHotKeyID.id` and calls `AppDelegate.triggerGrammarCheck(mode:)`
 3. `AppDelegate` captures text via `AccessibilityManager` (native apps) or clipboard fallback (browsers/Electron, auto-detected)
 4. `LLMServiceFactory.create()` instantiates the configured provider
-5. `processText(text:mode:)` resolves the system prompt via `PromptBuilder.systemPrompt(for:customAppendix:)` and calls `llmService.streamCorrection(text:systemPrompt:)`
+5. `processText(text:mode:)` resolves the system prompt via `PromptBuilder.systemPrompt(for:customAppendix:)` and calls `llmService.streamCorrection(text:systemPrompt:)` with `TextEnvelope(text).body`: plain `\n` line breaks, no surrounding whitespace. Apps such as Notes separate lines with U+2028, which models drop (gluing lines together), and responses are trimmed; `TextEnvelope.restore` puts the original breaks (by position, else the single kind used) and the selection's leading/trailing whitespace back before writing.
 6. Streaming response → `StreamingState` → `PopupWindowManager`'s floating `NSPanel`
 7. `GrammarPopupView` shows the source app + mode header, then a word-level diff (via `DiffCalculator`, LCS-based); Tab switches between the diff and the clean result (`.togglePopupResult`)
 8. Enter accepts → text is pasted back via Accessibility API or clipboard+paste fallback; Escape cancels

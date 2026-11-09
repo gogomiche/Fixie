@@ -94,6 +94,49 @@ final class LLMServiceTests: XCTestCase {
         XCTAssertEqual(result, "Héllo Wörld 日本語")
     }
 
+    // MARK: - Text Envelope (line breaks and surrounding whitespace)
+
+    func testTextEnvelope_restoresNotesLineSeparatorAndTrailingNewline() {
+        // Notes separates lines of a paragraph with U+2028; models drop it
+        let envelope = TextEnvelope("Salade de liangpi pas spicy\u{2028}Boeuf oignon\n")
+
+        XCTAssertEqual(envelope.body, "Salade de liangpi pas spicy\nBoeuf oignon")
+        XCTAssertEqual(
+            envelope.restore("Salade de liangpi pas épicée\nBœuf aux oignons"),
+            "Salade de liangpi pas épicée\u{2028}Bœuf aux oignons\n"
+        )
+    }
+
+    func testTextEnvelope_unchangedTextRoundTrips() {
+        let original = "  Line one\r\nLine two\u{2028}Line three\n\n"
+        let envelope = TextEnvelope(original)
+
+        XCTAssertEqual(envelope.body, "Line one\nLine two\nLine three")
+        XCTAssertEqual(envelope.restore(envelope.body), original)
+    }
+
+    func testTextEnvelope_keepsMixedBreaksInPlace() {
+        let envelope = TextEnvelope("A\u{2028}B\n\nC")
+
+        XCTAssertEqual(envelope.restore("a\nb\n\nc"), "a\u{2028}b\n\nc")
+    }
+
+    func testTextEnvelope_usesTheOnlyBreakKindWhenLineCountChanges() {
+        let envelope = TextEnvelope("One\u{2028}Two")
+
+        XCTAssertEqual(envelope.restore("One\nTwo\nThree"), "One\u{2028}Two\u{2028}Three")
+    }
+
+    func testTextEnvelope_fallsBackToNewlinesForMixedBreaksWhenLineCountChanges() {
+        let envelope = TextEnvelope("A\u{2028}B\nC")
+
+        XCTAssertEqual(envelope.restore("A B C\nD"), "A B C\nD")
+    }
+
+    func testTextEnvelope_normalizesModelLineBreaks() {
+        XCTAssertEqual(TextEnvelope.normalizingLineBreaks("a\r\nb\u{2029}c\rd"), "a\nb\nc\nd")
+    }
+
     func testContainsProblematicContent_detectsLongLines() {
         let longLine = String(repeating: "a", count: 10001)
         XCTAssertTrue(longLine.containsProblematicContent)

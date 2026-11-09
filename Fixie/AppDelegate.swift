@@ -216,6 +216,10 @@ class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCenterDele
         currentTask?.cancel()
         isProcessing = true
 
+        // The model and the diff see plain "\n" breaks and no surrounding
+        // whitespace; the original ones are put back before writing.
+        let envelope = TextEnvelope(text)
+
         let llmService = LLMServiceFactory.create(provider: settingsManager.selectedProvider, settings: settingsManager)
         let systemPrompt = PromptBuilder.systemPrompt(
             for: mode,
@@ -229,7 +233,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCenterDele
 
         // Show popup
         popupManager.showPopup(
-            originalText: text,
+            originalText: envelope.body,
             streamingState: streamingState,
             providerName: getProviderDisplayName(),
             mode: mode,
@@ -249,16 +253,17 @@ class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCenterDele
                 try Task.checkCancellation()
                 var fullText = ""
 
-                for try await chunk in llmService.streamCorrection(text: text, systemPrompt: systemPrompt) {
+                for try await chunk in llmService.streamCorrection(text: envelope.body, systemPrompt: systemPrompt) {
                     try Task.checkCancellation()
                     fullText += chunk
                     self.streamingState.text = fullText
                 }
 
                 try Task.checkCancellation()
-                let correctedText = PromptBuilder.sanitizeResponse(fullText)
-                self.currentCorrectedText = correctedText
-                self.streamingState.text = correctedText
+                let correctedBody = TextEnvelope.normalizingLineBreaks(PromptBuilder.sanitizeResponse(fullText))
+                // An empty answer stays empty (acceptCorrection ignores it) rather than becoming bare whitespace
+                self.currentCorrectedText = correctedBody.isEmpty ? "" : envelope.restore(correctedBody)
+                self.streamingState.text = correctedBody
                 self.streamingState.isComplete = true
             } catch is CancellationError {
                 // Task was cancelled - ignore
@@ -298,7 +303,8 @@ class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCenterDele
         accessibilityManager.clearSavedElement()
 
         // Nothing to change: don't touch the document at all.
-        if textToPaste == currentOriginalText.trimmingCharacters(in: .whitespacesAndNewlines) {
+        // (textToPaste carries the original line breaks and surrounding whitespace.)
+        if textToPaste == currentOriginalText {
             print("[Fixie] acceptCorrection: text unchanged, nothing to insert")
             clipboardManager.restoreSavedContent()
             popupManager.closeWindow()
