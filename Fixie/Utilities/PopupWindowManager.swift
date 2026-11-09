@@ -3,7 +3,7 @@ import SwiftUI
 
 /// NSPanel subclass that intercepts key events directly,
 /// allowing the popup to work without activating the app (critical for full-screen).
-private class FixiePanel: NSPanel {
+final class FixiePanel: NSPanel {
     var onKeyHandler: ((UInt16) -> Bool)?
 
     override var canBecomeKey: Bool { true }
@@ -49,14 +49,12 @@ class PopupWindowManager {
         self.onAccept = onAccept
         self.onReject = onReject
 
-        // Get the source app icon
-        let sourceAppIcon = previousApp?.icon
-
         let popupView = StreamingGrammarPopupView(
             originalText: originalText,
             streamingState: streamingState,
             providerName: providerName,
-            sourceAppIcon: sourceAppIcon,
+            sourceAppIcon: previousApp?.icon,
+            sourceAppName: previousApp?.localizedName,
             mode: mode,
             onAccept: { [weak self] in
                 self?.onAccept?()
@@ -66,41 +64,7 @@ class PopupWindowManager {
             }
         )
 
-        let hostingView = NSHostingView(rootView: popupView)
-
-        // Calculate window size based on content
-        let width: CGFloat = 600
-        let height: CGFloat = min(500, max(250, CGFloat(originalText.count / 2) + 150))
-
-        // Create borderless floating panel (FixiePanel handles keys without app activation)
-        let panel = FixiePanel(
-            contentRect: NSRect(x: 0, y: 0, width: width, height: height),
-            styleMask: [.borderless, .nonactivatingPanel],
-            backing: .buffered,
-            defer: false
-        )
-
-        // Make hosting view transparent
-        hostingView.wantsLayer = true
-        hostingView.layer?.backgroundColor = .clear
-
-        panel.contentView = hostingView
-        panel.backgroundColor = .clear
-        panel.isOpaque = false
-        panel.hasShadow = true
-        // popUpMenu level (101) ensures the panel appears above full-screen windows
-        panel.level = .popUpMenu
-        // moveToActiveSpace: panel moves to the current space (including full-screen)
-        // so NSApp.activate won't cause a space switch
-        panel.collectionBehavior = [.moveToActiveSpace, .fullScreenAuxiliary]
-        panel.isMovableByWindowBackground = true
-
-        // Ensure window has no visible border
-        if let contentView = panel.contentView {
-            contentView.wantsLayer = true
-            contentView.layer?.cornerRadius = 20
-            contentView.layer?.masksToBounds = true
-        }
+        let panel = Self.makePanel(rootView: popupView, size: Self.panelSize(for: originalText))
 
         // Key handling via panel subclass (no local event monitor needed)
         panel.onKeyHandler = { [weak self] keyCode in
@@ -115,7 +79,7 @@ class PopupWindowManager {
                 self.onReject?()
                 return true
             case 48: // Tab
-                NotificationCenter.default.post(name: .toggleMarkdownPreview, object: nil)
+                NotificationCenter.default.post(name: .togglePopupResult, object: nil)
                 return true
             default:
                 return false
@@ -139,6 +103,40 @@ class PopupWindowManager {
         // Activate AFTER the panel is on the current space (moveToActiveSpace)
         // so macOS doesn't switch to a different space.
         NSApp.activate(ignoringOtherApps: true)
+    }
+
+    /// Popup size, growing with the text to correct.
+    static func panelSize(for originalText: String) -> NSSize {
+        NSSize(width: 600, height: min(500, max(270, CGFloat(originalText.count / 2) + 170)))
+    }
+
+    /// Borderless floating panel with a Liquid Glass background
+    /// (`FixiePanel` handles keys without activating the app).
+    static func makePanel<Content: View>(rootView: Content, size: NSSize) -> FixiePanel {
+        let panel = FixiePanel(
+            contentRect: NSRect(origin: .zero, size: size),
+            styleMask: [.borderless, .nonactivatingPanel],
+            backing: .buffered,
+            defer: false
+        )
+
+        let hostingView = NSHostingView(rootView: rootView)
+        // The panel keeps the size computed above instead of following the SwiftUI layout
+        hostingView.sizingOptions = []
+        hostingView.wantsLayer = true
+        hostingView.layer?.backgroundColor = .clear
+
+        panel.contentView = GlassPanelBackground.wrap(hostingView, cornerRadius: PopupMetrics.cornerRadius)
+        panel.backgroundColor = .clear
+        panel.isOpaque = false
+        panel.hasShadow = true
+        // popUpMenu level (101) ensures the panel appears above full-screen windows
+        panel.level = .popUpMenu
+        // moveToActiveSpace: panel moves to the current space (including full-screen)
+        // so NSApp.activate won't cause a space switch
+        panel.collectionBehavior = [.moveToActiveSpace, .fullScreenAuxiliary]
+        panel.isMovableByWindowBackground = true
+        return panel
     }
 
     /// Close the popup window

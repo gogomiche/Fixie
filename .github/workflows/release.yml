@@ -19,7 +19,8 @@ permissions:
 
 jobs:
   release:
-    runs-on: macos-15
+    # macOS 26 runner: its Xcode 26 SDK is needed for Liquid Glass (older SDKs build the material fallback)
+    runs-on: macos-26
     env:
       # Empty on pull requests: build and test only, no release.
       TAG: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.tag || (startsWith(github.ref, 'refs/tags/') && github.ref_name || '') }}

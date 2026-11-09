@@ -187,7 +187,7 @@ final class SettingsTests: XCTestCase {
     }
 
     func testLLMProvider_displayName() {
-        XCTAssertEqual(LLMProvider.claude.displayName, "Claude")
+        XCTAssertEqual(LLMProvider.claude.displayName, "Anthropic")
         XCTAssertEqual(LLMProvider.openai.displayName, "OpenAI")
         XCTAssertEqual(LLMProvider.ollama.displayName, "Ollama")
     }
