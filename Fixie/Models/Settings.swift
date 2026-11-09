@@ -2,12 +2,18 @@ import Foundation
 import SwiftUI
 
 enum LLMProvider: String, CaseIterable, Codable {
+    // Raw values are persisted in UserDefaults: never rename them
     case claude = "Claude"
     case openai = "OpenAI"
     case ollama = "Ollama"
 
+    /// Company name shown in Settings and error messages.
     var displayName: String {
-        return self.rawValue
+        switch self {
+        case .claude: return "Anthropic"
+        case .openai: return "OpenAI"
+        case .ollama: return "Ollama"
+        }
     }
 
     var requiresAPIKey: Bool {
@@ -98,6 +104,18 @@ struct HotkeyConfig: Codable, Equatable {
         parts.append(keyName)
 
         return parts.joined()
+    }
+
+    /// One label per key, in the standard macOS order (⌃⌥⇧⌘ then the key),
+    /// for rendering the shortcut as key caps.
+    var keyCaps: [String] {
+        var caps: [String] = []
+        if modifiers & 0x1000 != 0 { caps.append("⌃") }
+        if modifiers & 0x800 != 0 { caps.append("⌥") }
+        if modifiers & 0x200 != 0 { caps.append("⇧") }
+        if modifiers & 0x100 != 0 { caps.append("⌘") }
+        caps.append(keyCodeToString(keyCode))
+        return caps
     }
 
     private func keyCodeToString(_ keyCode: UInt32) -> String {
@@ -426,6 +444,15 @@ class SettingsManager: ObservableObject {
             return !openAIAPIKey.isEmpty
         case .ollama:
             return true
+        }
+    }
+
+    /// Compact name of the model in use (popup subtitle, Settings status).
+    var activeModelDisplayName: String {
+        switch selectedProvider {
+        case .claude: return ModelCatalog.displayName(for: claudeModel)
+        case .openai: return ModelCatalog.displayName(for: openAIModel)
+        case .ollama: return ollamaModel
         }
     }
 

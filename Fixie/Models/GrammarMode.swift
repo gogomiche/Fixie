@@ -22,6 +22,22 @@ enum GrammarMode: String, CaseIterable, Codable {
         }
     }
 
+    /// One-line description shown next to the shortcut in Settings.
+    var tagline: String {
+        switch self {
+        case .grammar: return "Fixes spelling and grammar, nothing else"
+        case .improve: return "Lightly rewrites for clarity and flow"
+        }
+    }
+
+    /// SF Symbol identifying the mode (popup badge, Settings rows).
+    var symbolName: String {
+        switch self {
+        case .grammar: return "text.badge.checkmark"
+        case .improve: return "wand.and.stars"
+        }
+    }
+
     /// Loading text shown while the LLM is streaming.
     var loadingLabel: String {
         switch self {

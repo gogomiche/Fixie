@@ -392,13 +392,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCenterDele
     // MARK: - Helpers
 
     private func getProviderDisplayName() -> String {
-        let modelId: String
-        switch settingsManager.selectedProvider {
-        case .claude: modelId = settingsManager.claudeModel
-        case .openai: modelId = settingsManager.openAIModel
-        case .ollama: return settingsManager.ollamaModel
-        }
-        return ModelCatalog.displayName(for: modelId)
+        settingsManager.activeModelDisplayName
     }
 
     // MARK: - Alerts
@@ -451,21 +445,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCenterDele
 
     @objc func openSettings() {
         if settingsWindow == nil {
-            let settingsView = SettingsView().environmentObject(settingsManager)
-            let hostingController = NSHostingController(rootView: settingsView)
-
-            let window = NSWindow(
-                contentRect: NSRect(x: 0, y: 0, width: 550, height: 400),
-                styleMask: [.titled, .closable],
-                backing: .buffered,
-                defer: false
-            )
-            window.contentViewController = hostingController
-            window.title = "Fixie Settings"
-            window.center()
-            window.isReleasedWhenClosed = false
-
-            settingsWindow = window
+            settingsWindow = SettingsView.makeWindow(settings: settingsManager)
         }
 
         settingsWindow?.makeKeyAndOrderFront(nil)

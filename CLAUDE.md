@@ -40,7 +40,7 @@ Each mode has its own base system prompt + a user-editable custom appendix (Sett
 4. `LLMServiceFactory.create()` instantiates the configured provider
 5. `processText(text:mode:)` resolves the system prompt via `PromptBuilder.systemPrompt(for:customAppendix:)` and calls `llmService.streamCorrection(text:systemPrompt:)`
 6. Streaming response → `StreamingState` → `PopupWindowManager`'s floating `NSPanel`
-7. `GrammarPopupView` shows the popup title from `mode.popupTitle` plus a word-level diff (via `DiffCalculator`, LCS-based)
+7. `GrammarPopupView` shows the source app + mode header, then a word-level diff (via `DiffCalculator`, LCS-based); Tab switches between the diff and the clean result (`.togglePopupResult`)
 8. Enter accepts → text is pasted back via Accessibility API or clipboard+paste fallback; Escape cancels
 
 ### Text Insertion Strategy
@@ -81,6 +81,13 @@ Factory: `LLMServiceFactory.create(provider:settings:)`
 - `OpenAIService` treats `gpt-5*`/`gpt-6*`/o-series as reasoning models: `max_completion_tokens`, no `temperature`, and the lowest accepted `reasoning_effort` (`none` for GPT-6 Terra/Luna, `low` for Astra/Sol).
 - `ServiceConfiguration` validates API key formats (prefix checks: `sk-ant-` for Claude, `sk-` for OpenAI)
 
+### UI (Liquid Glass)
+
+`Fixie/Views/Glass.swift` holds the Liquid Glass building blocks: `GlassPanelBackground.wrap` (popup background), `fixieGlassBackground(in:)`, `fixieButtonStyle(prominent:)`, `KeyCap`, `IconTile`. Glass APIs are behind `#if compiler(>=6.2)` (Xcode 26 SDK) and `#available(macOS 26.0, *)`; older systems get the closest material, so the app still targets macOS 13.
+- Popup: `PopupWindowManager.makePanel` puts the SwiftUI view in an `NSGlassEffectView`. Its layer is masked to `PopupMetrics.cornerRadius`: glass buttons add a full-size backdrop layer, and without the mask the window shadow follows a square outline. An animated rim (`GenerationGlow`) shows while streaming.
+- Provider logos (Anthropic, OpenAI, Ollama) are vector `Shape`s in `ProviderLogo.swift`, converted from simple-icons SVG paths (24 × 24 grid), so they need no asset catalog. `LLMProvider.displayName` shows "Anthropic" for `.claude`; raw values are persisted and must not change.
+- Settings: `SettingsView.makeWindow` builds the window (full-size content, transparent title bar, empty unified toolbar so the traffic lights sit inside the floating glass sidebar, title row = `SettingsMetrics.titlebarHeight`). The sidebar is drawn by the app, not `NavigationSplitView`: on current macOS the native sidebar is full-height.
+
 ### Singleton Managers
 
 `AccessibilityManager.shared`, `ClipboardManager.shared`, `KeyboardSimulator.shared`, `PopupWindowManager.shared`, `KeychainManager.shared` — all use private `init()`.
@@ -93,9 +100,13 @@ Test target: `FixieTests/` covering `DiffCalculator`, `GrammarCheckState`, `Keyc
 
 `Tools/EditorQA/run.sh [base-ref] [report.md]` builds (Command Line Tools are enough, no Xcode) and runs a harness that loads real web editors in a `WKWebView` — Quill 1/2 (Slack), Slate (Slite), TipTap/ProseMirror, Lexical, CKEditor 5, bare contenteditable, textarea — and replays Fixie's copy → markdown → clipboard → paste round-trip with synthetic clipboard events, comparing the converters of `base-ref` (default `main`) with the working tree. It also checks app classification on the installed apps and clipboard save/restore. Editors are loaded from CDNs (network required). Run it after touching any converter.
 
+### UI preview harness
+
+`Tools/UIPreview/run.sh [output-dir]` builds the app sources with `swiftc` (Command Line Tools are enough) and saves PNGs of the popup (changes, result, streaming, no changes) and every Settings pane, in dark and light, over a wallpaper backdrop (`ONLY=settings` to filter). It captures its own windows, so no Screen Recording permission; the Keychain is stubbed. Windows show on screen for ~30 s. With Command Line Tools only, it builds against a macOS 26 SDK: from the macOS 27 SDK on, `@State` is a macro whose plugin ships with Xcode. Run it after any UI change and look at the images.
+
 ## Platform Requirements
 
-- macOS 13.0+ (Ventura), Xcode 15.0+, Swift 5.9
+- macOS 13.0+ (Ventura), Xcode 15.0+, Swift 5.9 (Xcode 26+ for the Liquid Glass UI; older Xcode builds the material fallback)
 - No external dependencies — native Apple frameworks only
 - Sandbox disabled (required for global hotkey and Accessibility API)
 - `LSUIElement: true` in Info.plist (menu bar only, no dock icon)
@@ -120,7 +131,7 @@ DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer xcodebuild -project Fix
 
 ### Automated release (preferred)
 
-`.github/workflows/release.yml` runs on a macOS runner (no local Xcode needed): on every PR it runs the unit tests (except `KeychainManagerTests`) and a Release build; on a pushed `v*` tag it also checks `MARKETING_VERSION` matches the tag, ad-hoc signs, builds `Fixie.dmg` and attaches it to a **draft** release. Review the notes, then publish with `gh release edit vX.Y.Z --draft=false --latest`.
+`.github/workflows/release.yml` runs on a macOS 26 runner (no local Xcode needed): on every PR it runs the unit tests (except `KeychainManagerTests`) and a Release build; on a pushed `v*` tag it also checks `MARKETING_VERSION` matches the tag, ad-hoc signs, builds `Fixie.dmg` and attaches it to a **draft** release. Review the notes, then publish with `gh release edit vX.Y.Z --draft=false --latest`.
 
 ```bash
 git tag v1.4.0 && git push origin v1.4.0   # after bumping MARKETING_VERSION / CURRENT_PROJECT_VERSION on main
